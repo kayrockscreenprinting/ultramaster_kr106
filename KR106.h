@@ -97,6 +97,7 @@ private:
   IBufferSender<2> mScopeSender;
   bool mHostStateLoaded = false;          // true after first UnserializeState (host restore)
   bool mNeedChevronRestore = true;        // restore transpose chevron on first OnIdle with UI
+  bool mRestoringPreset = false;          // true while Plugin::UnserializeState is running
 
 public:
   // Called from UI to individually release a held note (bypasses hold suppression).

@@ -56,8 +56,10 @@ struct HPF
 
   void SetMode(int mode)
   {
-    mMode = std::clamp(mode, 0, 3);
-    mHpS = 0.f; // reset state to avoid click on switch
+    int newMode = std::clamp(mode, 0, 3);
+    if (newMode == mMode) return;
+    mMode = newMode;
+    mHpS = 0.f; // reset state to avoid click on mode switch
     mLpS = 0.f;
     Recalc();
   }
@@ -514,6 +516,8 @@ public:
       {
         bool wasEnabled = mArp.mEnabled;
         mArp.mEnabled = value > 0.5;
+        if (mSuppressHoldRelease)
+          break; // preserve note state during preset load; arp will resume with existing notes
         if (mArp.mEnabled && !wasEnabled)
         {
           // Seed arp with all currently sounding notes:
@@ -562,7 +566,7 @@ public:
       // --- Hold ---
       case kHold:
         mHold = value > 0.5;
-        if (!mHold)
+        if (!mHold && !mSuppressHoldRelease)
           ReleaseHeldNotes();
         break;
 
@@ -597,6 +601,7 @@ public:
 
   std::bitset<128> mHeldNotes;   // for Hold button release tracking
   std::bitset<128> mKeysDown;    // physical key state (for arp seeding)
+  bool mSuppressHoldRelease = false; // true during preset load to keep held notes alive
   std::vector<T> mLFOBuffer;
   std::vector<T> mSyncBuffer;   // oscillator sync pulses for scope trigger
   std::vector<T*> mModulations;

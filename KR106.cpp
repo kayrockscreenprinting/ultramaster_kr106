@@ -313,7 +313,7 @@ void KR106::OnParamChange(int paramIdx)
   else
   {
     mDSP.SetParam(paramIdx, GetParam(paramIdx)->Value());
-    if (paramIdx == kHold && !GetParam(kHold)->Bool())
+    if (paramIdx == kHold && !GetParam(kHold)->Bool() && !mRestoringPreset)
       mHoldOff = true; // signal audio thread to release held keyboard display
   }
 }
@@ -340,7 +340,11 @@ int KR106::UnserializeState(const IByteChunk& chunk, int startPos)
   for (int i = 0; i < nLive; i++)
     saved[i] = GetParam(kLiveParams[i])->Value();
 
+  mRestoringPreset = true;
+  mDSP.mSuppressHoldRelease = true;
   int pos = Plugin::UnserializeState(chunk, startPos);
+  mRestoringPreset = false;
+  mDSP.mSuppressHoldRelease = false;
 
   for (int i = 0; i < nLive; i++)
   {
