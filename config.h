@@ -63,3 +63,4 @@
 #define SWITCH_3WAY_FN "switch_3way.png"
 #define LED_RED_FN "led_red.png"
 #define BENDER_GRADIENT_FN "kr106_bender_gradient.png"
+#define TRANSPOSE_CHEVRON_FN "transpose_chevron.png"

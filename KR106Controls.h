@@ -324,6 +324,15 @@ static inline void Pixel(IGraphics& g, const IColor& c, float x, float y)
   g.FillRect(c, IRECT(x, y, x + 1.f, y + 1.f));
 }
 
+// Helper: draw a 7-wide x 4-tall downward-pointing chevron, tip at (cx, y+3)
+static inline void DrawDownChevron(IGraphics& g, const IColor& c, float cx, float y)
+{
+  Pixel(g, c, cx - 3, y);     Pixel(g, c, cx + 3, y);
+  Pixel(g, c, cx - 2, y + 1); Pixel(g, c, cx + 2, y + 1);
+  Pixel(g, c, cx - 1, y + 2); Pixel(g, c, cx + 1, y + 2);
+  Pixel(g, c, cx,     y + 3);
+}
+
 // Button + LED combo (button_control in original).
 // The button is at (x, y) size 17x19, LED is at (x+4, y-9) size 9x9
 // Button bevel is momentary (pressed while mouse held), LED shows param state
@@ -1192,8 +1201,9 @@ public:
   static constexpr int kMinNote = 36;  // C2
   static constexpr int kNumKeys = 61;
 
-  KR106KeyboardControl(const IRECT& bounds)
+  KR106KeyboardControl(const IRECT& bounds, const IBitmap& chevronBitmap)
   : IControl(bounds)
+  , mChevronBitmap(chevronBitmap)
   {
     memset(mKeys, 0, sizeof(mKeys));
   }
@@ -1201,7 +1211,8 @@ public:
   void Draw(IGraphics& g) override
   {
     float ox = std::round(mRECT.L);
-    float oy = std::round(mRECT.T);
+    float strip = std::round(mRECT.T);  // y=106: 5px strip for transpose indicator
+    float oy = strip + 5;               // y=111: keys start here
 
     for (int oct = 0; oct < 5; oct++) {
       int key = oct * 12;
@@ -1220,12 +1231,41 @@ public:
       KB_DrawRight  (g, x + 132, oy, mKeys[key + 11]);
     }
     KB_DrawLast(g, ox + 770, oy, mKeys[60]);
+
+    // Transpose indicator — chevron bitmap in the 5px strip above the keys
+    if (mTransposeKey >= 0)
+    {
+      static const int xOffsets[12]      = {0, 13, 22, 40, 44, 66, 79, 88, 103, 110, 128, 132};
+      // Per-key center offset from key's draw origin (derived from top light-fill midpoints)
+      // C    C#   D    D#   E    F    F#   G    G#   A    A#   B
+      static const float kCX[12]        = {7.f, 7.f,12.f, 7.f,16.f, 7.f, 7.f,10.f, 7.f,13.f, 7.f,16.f};
+      float kx = (mTransposeKey == 60) ? ox + 770
+               : ox + (mTransposeKey / 12) * 154.f + xOffsets[mTransposeKey % 12];
+      float cx = kx + (mTransposeKey == 60 ? 12.f : kCX[mTransposeKey % 12]);
+      float bw = mChevronBitmap.FW();
+      float bh = mChevronBitmap.FH();
+      IRECT chevRect(cx - bw / 2.f, strip + (5.f - bh) / 2.f,
+                     cx + bw / 2.f, strip + (5.f - bh) / 2.f + bh);
+      g.DrawBitmap(mChevronBitmap, chevRect, 1, nullptr);
+    }
   }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
     int key = MouseToKey(x, y);
     if (key < 0) return;
+
+    bool transposeOn = GetDelegate()->GetParam(kTranspose)->Bool();
+    if (transposeOn)
+    {
+      // Transpose mode: just move the highlight indicator, don't press the key.
+      int offset = (key + kMinNote) - 60;
+      mTransposeKey = (offset == 0) ? -1 : key; // hide chevron when back at root
+      static_cast<KR106*>(GetDelegate())->SetTransposeOffset(offset);
+      mPressedKey = -1;
+      SetDirty(false);
+      return;
+    }
 
     bool holdOn = GetDelegate()->GetParam(kHold)->Bool();
     if (holdOn && mKeys[key]) {
@@ -1245,6 +1285,18 @@ public:
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
+    bool transposeOn = GetDelegate()->GetParam(kTranspose)->Bool();
+    if (transposeOn)
+    {
+      int key = MouseToKey(x, y);
+      if (key < 0 || key == mTransposeKey) return;
+      int offset = (key + kMinNote) - 60;
+      mTransposeKey = (offset == 0) ? -1 : key; // hide chevron when back at root
+      static_cast<KR106*>(GetDelegate())->SetTransposeOffset(offset);
+      SetDirty(false);
+      return;
+    }
+
     int key = MouseToKey(x, y);
     if (key == mPressedKey) return;
     if (mPressedKey >= 0) {
@@ -1300,6 +1352,16 @@ public:
     SetDirty(false);
   }
 
+  // Called from OnIdle when Transpose turns off — clears the transpose root indicator.
+  void ClearTransposeKey()
+  {
+    if (mTransposeKey >= 0)
+    {
+      mTransposeKey = -1;
+      SetDirty(false);
+    }
+  }
+
 private:
   static constexpr int kTopOffsets[] = {13, 27, 40, 54, 66, 79, 93, 103, 117, 128, 142, 154};
   static constexpr int kBottomOffsets[] = {22, 22, 44, 44, 66, 88, 88, 110, 110, 132, 132, 154};
@@ -1307,7 +1369,7 @@ private:
   int MouseToKey(float mx, float my) const
   {
     int lx = (int)(mx - std::round(mRECT.L));
-    int ly = (int)(my - std::round(mRECT.T));
+    int ly = (int)(my - std::round(mRECT.T)) - 5; // account for 5px strip above keys
     if (lx < 0 || lx >= 792 || ly < 0 || ly >= 109) return -1;
 
     int octave = lx / 154;
@@ -1339,5 +1401,7 @@ private:
 
   bool mKeys[kNumKeys] = {};
   int mPressedKey = -1;
+  int mTransposeKey = -1; // key index of current transpose root indicator, -1 = none
+  IBitmap mChevronBitmap;
   bool mHoldRelease = false;
 };

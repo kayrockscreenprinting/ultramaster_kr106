@@ -84,6 +84,7 @@ KR106::KR106(const InstanceInfo& info)
     const IBitmap switch2wayBitmap = pGraphics->LoadBitmap(SWITCH_2WAY_FN, 2);
     const IBitmap switch3wayBitmap = pGraphics->LoadBitmap(SWITCH_3WAY_FN, 3);
     const IBitmap ledBitmap = pGraphics->LoadBitmap(LED_RED_FN, 2);
+    const IBitmap transposeChevronBitmap = pGraphics->LoadBitmap(TRANSPOSE_CHEVRON_FN);
 
     // Background panel
     pGraphics->AttachControl(new IBitmapControl(0, 0, bgBitmap));
@@ -183,8 +184,8 @@ KR106::KR106(const InstanceInfo& info)
     //  IText(8.f, COLOR_WHITE, "Roboto-Regular", EAlign::Far)));
 
     // === KEYBOARD ===
-    // Original: (129, 111) size 792x109 — 61 keys C2 to C7
-    pGraphics->AttachControl(new KR106KeyboardControl(IRECT(129, 111, 921, 220)), kCtrlTagKeyboard);
+    // Bounds start at y=106 (5px above keys) to include the transpose chevron strip
+    pGraphics->AttachControl(new KR106KeyboardControl(IRECT(129, 106, 921, 220), transposeChevronBitmap), kCtrlTagKeyboard);
 
     // QWERTY keyboard handler
     pGraphics->SetQwertyMidiKeyHandlerFunc([pGraphics](const IMidiMsg& msg) {
@@ -221,6 +222,9 @@ void KR106::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
       mKeyboardHeld.reset(noteNum); // prevent spurious NoteOff to keyboard when hold turns off
     }
   }
+
+  // Apply keyboard transpose offset (set from UI thread via mTransposeOffset atomic)
+  mDSP.SetKeyTranspose(mTransposeOffset.load());
 
   mDSP.ProcessBlock(inputs, outputs, 2, nFrames);
   if (!mPowerOn)
@@ -316,6 +320,8 @@ void KR106::OnIdle()
     auto* pKb = static_cast<KR106KeyboardControl*>(pUI->GetControlWithTag(kCtrlTagKeyboard));
     if (pKb)
     {
+      if (mTransposeOff.exchange(false))
+        pKb->ClearTransposeKey();
       IMidiMsg msg;
       while (mMidiForKeyboard.Pop(msg))
         pKb->SetNoteFromMidi(msg.NoteNumber(),

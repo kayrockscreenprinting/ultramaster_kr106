@@ -92,8 +92,12 @@ private:
   std::atomic<bool> mHoldOff{false};     // set from UI when Hold turns off
   std::bitset<128> mKeyboardHeld;        // visually held notes (audio thread only)
   IPlugQueue<int> mForceRelease{16};     // notes to force-release from hold/arp (UI→audio)
+  std::atomic<int>  mTransposeOffset{0};  // semitone offset applied to all incoming MIDI notes
+  std::atomic<bool> mTransposeOff{false}; // set when Transpose turns off, drained in OnIdle
 
 public:
   // Called from UI to individually release a held note (bypasses hold suppression).
   void ForceReleaseNote(int noteNum) { mForceRelease.Push(noteNum); }
+  // Called from UI keyboard when Transpose is on — sets the semitone pitch offset.
+  void SetTransposeOffset(int semitones) { mTransposeOffset.store(semitones); }
 };

@@ -27,7 +27,12 @@ reaper: vst3
 	open -a REAPER
 
 clean:
-	xcodebuild -project "$(PROJECT)" -target All -configuration $(CONFIG) clean
+	rm -rf build-mac
+	find "$(HOME)/Library/Developer/Xcode/DerivedData" -maxdepth 1 -name 'KR106-macOS-*' -exec rm -rf {} +
+	rm -rf "$(HOME)/Applications/KR106.app"
+	rm -rf "$(HOME)/Library/Audio/Plug-Ins/Components/KR106.component"
+	rm -rf "$(HOME)/Library/Audio/Plug-Ins/VST3/KR106.vst3"
+	rm -rf "$(HOME)/Library/Audio/Plug-Ins/CLAP/KR106.clap"
 
 presets:
 	python3 scripts/gen_presets.py

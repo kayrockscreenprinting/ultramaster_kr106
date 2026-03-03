@@ -398,16 +398,14 @@ public:
       case kOctTranspose:
       {
         mOctaveTranspose = 1 - static_cast<int>(value); // 0=up(+1), 1=normal(0), 2=down(-1)
-        float semi = mOctaveTranspose * 12.f + static_cast<float>(mTuning);
-        mSynth.SetNoteOffset(mOctaveTranspose * 12.0 + mTuning);
+        float semi = mOctaveTranspose * 12.f + static_cast<float>(mTuning) + mKeyTranspose;
         SetVoiceParam([semi](kr106::Voice<T>& v) { v.mOctTranspose = semi; });
         break;
       }
       case kTuning:
       {
         mTuning = value; // -1..+1 semitones
-        float semi = mOctaveTranspose * 12.f + static_cast<float>(mTuning);
-        mSynth.SetNoteOffset(mOctaveTranspose * 12.0 + mTuning);
+        float semi = mOctaveTranspose * 12.f + static_cast<float>(mTuning) + mKeyTranspose;
         SetVoiceParam([semi](kr106::Voice<T>& v) { v.mOctTranspose = semi; });
         break;
       }
@@ -430,10 +428,12 @@ public:
         mArp.mEnabled = value > 0.5;
         if (mArp.mEnabled && !wasEnabled)
         {
-          // Seed arp with currently held keys and release direct voices
+          // Seed arp with all currently sounding notes:
+          // physically held keys (mKeysDown) + hold-held notes (mHeldNotes)
+          std::bitset<128> toSeed = mKeysDown | mHeldNotes;
           for (int i = 0; i < 128; i++)
           {
-            if (mKeysDown.test(i))
+            if (toSeed.test(i))
             {
               mArp.NoteOn(i);
               IMidiMsg off;
@@ -441,9 +441,31 @@ public:
               mSynth.AddMidiMsgToQueue(off);
             }
           }
+          // Hold-held notes are now owned by the arp
+          mHeldNotes.reset();
         }
         else if (!mArp.mEnabled)
         {
+          // Release the currently sounding arp note immediately
+          if (mArp.mLastNote >= 0)
+          {
+            IMidiMsg off;
+            off.MakeNoteOffMsg(mArp.mLastNote, 0);
+            mSynth.AddMidiMsgToQueue(off);
+            mArp.mLastNote = -1;
+          }
+          // If hold is active, restore the arp's notes as held notes
+          if (mHold)
+          {
+            mHeldNotes.reset();
+            for (int n : mArp.mHeldNotes)
+            {
+              IMidiMsg on;
+              on.MakeNoteOnMsg(n, 127, 0);
+              mSynth.AddMidiMsgToQueue(on);
+              mHeldNotes.set(n);
+            }
+          }
           mArp.Reset();
         }
         break;
@@ -477,6 +499,7 @@ public:
   float mSampleRate = 44100.f;
   int mOctaveTranspose = 0;
   double mTuning = 0.;
+  int mKeyTranspose = 0;  // semitone offset from keyboard transpose mode
   bool mHold = false;
   bool mTranspose = false;
   bool mChorusI = false;
@@ -517,6 +540,15 @@ private:
   }
 
 public:
+  // Set keyboard transpose offset (semitones). Called from audio thread each block.
+  void SetKeyTranspose(int semitones)
+  {
+    if (semitones == mKeyTranspose) return;
+    mKeyTranspose = semitones;
+    float semi = mOctaveTranspose * 12.f + static_cast<float>(mTuning) + mKeyTranspose;
+    SetVoiceParam([semi](kr106::Voice<T>& v) { v.mOctTranspose = semi; });
+  }
+
   // Force-release a single note, bypassing hold suppression.
   // Called from the plugin's audio block when the UI explicitly toggles a key off.
   // The note may or may not be in mHeldNotes (since OnMouseUp skips NoteOff when hold is on).
