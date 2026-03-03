@@ -726,10 +726,9 @@ public:
       VLine(g, dim, ox + i, oy, oy + h);
     VLine(g, dim, ox + w - 1, oy, oy + h);
 
-    // Horizontal grid lines
-    int hStep = (h > 64) ? 16 : 8;
-    for (int i = 0; i <= h; i += hStep)
-      HLine(g, dim, ox, oy + i, ox + w);
+    // Horizontal grid lines — 5 evenly spaced (top, 1/4, center, 3/4, bottom)
+    for (int i = 0; i < 5; i++)
+      HLine(g, dim, ox, oy + std::round(i * (h - 1) / 4.f), ox + w);
 
     // Center line (mid green, zero crossing)
     HLine(g, mid, ox, oy + v2, ox + w);
@@ -1227,9 +1226,20 @@ public:
   {
     int key = MouseToKey(x, y);
     if (key < 0) return;
-    mKeys[key] = true;
-    mPressedKey = key;
-    SendNoteOn(key);
+
+    bool holdOn = GetDelegate()->GetParam(kHold)->Bool();
+    if (holdOn && mKeys[key]) {
+      // Second click on a held key: toggle it off visually and in DSP/arp
+      mKeys[key] = false;
+      static_cast<KR106*>(GetDelegate())->ForceReleaseNote(key + kMinNote);
+      mHoldRelease = true;
+      mPressedKey = -1;
+    } else {
+      mKeys[key] = true;
+      mPressedKey = key;
+      SendNoteOn(key);
+      mHoldRelease = false;
+    }
     SetDirty(false);
   }
 
@@ -1248,13 +1258,21 @@ public:
     } else {
       mPressedKey = -1;
     }
+    mHoldRelease = false;
     SetDirty(false);
   }
 
   void OnMouseUp(float x, float y, const IMouseMod& mod) override
   {
+    mHoldRelease = false;
     if (mPressedKey >= 0) {
-      mKeys[mPressedKey] = false;
+      bool holdOn = GetDelegate()->GetParam(kHold)->Bool();
+      if (!holdOn)
+        mKeys[mPressedKey] = false; // Hold off: clear visual immediately
+      // Always send NoteOff: when hold is on it's suppressed by ProcessMidiMsg but
+      // registers in mHeldNotes so ReleaseHeldNotes() can clean up when hold turns off.
+      // The visual stays lit because mKeys wasn't cleared and the NoteOff is never
+      // forwarded to the keyboard display (suppressed before reaching mMidiForKeyboard).
       SendNoteOff(mPressedKey);
       mPressedKey = -1;
       SetDirty(false);
@@ -1321,4 +1339,5 @@ private:
 
   bool mKeys[kNumKeys] = {};
   int mPressedKey = -1;
+  bool mHoldRelease = false;
 };

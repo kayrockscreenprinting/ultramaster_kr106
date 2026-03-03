@@ -172,15 +172,15 @@ KR106::KR106(const InstanceInfo& info)
     pGraphics->AttachControl(new KR106ButtonLEDControl(IRECT(767, 43, 784, 71), kChorusII, kOrange, ledBitmap));
 
     // === VALUE READOUT (below slider panel) ===
-    pGraphics->AttachControl(new KR106ValueReadout(IRECT(229, 88, 726, 102)));
+    //pGraphics->AttachControl(new KR106ValueReadout(IRECT(229, 88, 726, 102)));
 
     // === SCOPE (upper right) ===
-    pGraphics->AttachControl(new KR106ScopeControl(IRECT(791, 24, 919, 90)), kCtrlTagScope);
+    pGraphics->AttachControl(new KR106ScopeControl(IRECT(791, 21, 919, 95)), kCtrlTagScope);
 
     // Build timestamp — baked in at compile time so you can confirm the loaded version
-    pGraphics->AttachControl(new ITextControl(IRECT(791, 91, 940, 101),
-      __DATE__ " " __TIME__,
-      IText(8.f, COLOR_WHITE, "Roboto-Regular", EAlign::Far)));
+    //pGraphics->AttachControl(new ITextControl(IRECT(791, 96, 940, 106),
+    //  __DATE__ " " __TIME__,
+    //  IText(8.f, COLOR_WHITE, "Roboto-Regular", EAlign::Far)));
 
     // === KEYBOARD ===
     // Original: (129, 111) size 792x109 — 61 keys C2 to C7
@@ -198,6 +198,30 @@ KR106::KR106(const InstanceInfo& info)
 #if IPLUG_DSP
 void KR106::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
 {
+  if (mHoldOff.exchange(false))
+  {
+    for (int i = 0; i < 128; i++)
+    {
+      if (mKeyboardHeld.test(i))
+      {
+        IMidiMsg off;
+        off.MakeNoteOffMsg(i, 0);
+        mMidiForKeyboard.Push(off);
+      }
+    }
+    mKeyboardHeld.reset();
+  }
+
+  // Drain UI-initiated individual note releases (bypasses hold suppression)
+  {
+    int noteNum;
+    while (mForceRelease.Pop(noteNum))
+    {
+      mDSP.ForceRelease(noteNum);
+      mKeyboardHeld.reset(noteNum); // prevent spurious NoteOff to keyboard when hold turns off
+    }
+  }
+
   mDSP.ProcessBlock(inputs, outputs, 2, nFrames);
   if (!mPowerOn)
   {
@@ -222,10 +246,26 @@ void KR106::ProcessMidiMsg(const IMidiMsg& msg)
   TRACE;
   mDSP.ProcessMidiMsg(msg);
   SendMidiMsg(msg); // MIDI output
-  // Queue note-on/off for keyboard display (drained on UI thread in OnIdle)
+  // Queue note-on/off for keyboard display (drained on UI thread in OnIdle).
+  // When Hold is active, suppress note-offs so held keys stay visually lit.
   auto s = msg.StatusMsg();
-  if (s == IMidiMsg::kNoteOn || s == IMidiMsg::kNoteOff)
+  bool isNoteOn  = (s == IMidiMsg::kNoteOn  && msg.Velocity() > 0);
+  bool isNoteOff = (s == IMidiMsg::kNoteOff || (s == IMidiMsg::kNoteOn && msg.Velocity() == 0));
+  if (isNoteOn)
+  {
+    mKeyboardHeld.set(msg.NoteNumber());
     mMidiForKeyboard.Push(msg);
+  }
+  else if (isNoteOff)
+  {
+    if (mDSP.mHold)
+      ; // Hold active: key stays visually pressed
+    else
+    {
+      mKeyboardHeld.reset(msg.NoteNumber());
+      mMidiForKeyboard.Push(msg);
+    }
+  }
 }
 
 void KR106::OnParamChange(int paramIdx)
@@ -233,7 +273,37 @@ void KR106::OnParamChange(int paramIdx)
   if (paramIdx == kPower)
     mPowerOn = GetParam(kPower)->Bool();
   else
+  {
     mDSP.SetParam(paramIdx, GetParam(paramIdx)->Value());
+    if (paramIdx == kHold && !GetParam(kHold)->Bool())
+      mHoldOff = true; // signal audio thread to release held keyboard display
+  }
+}
+
+int KR106::UnserializeState(const IByteChunk& chunk, int startPos)
+{
+  // Live performance controls — not part of a patch, preserve across preset changes
+  static const int kLiveParams[] = {
+    kTuning, kTranspose, kHold,
+    kArpeggio, kArpRate, kArpMode, kArpRange
+  };
+  constexpr int nLive = sizeof(kLiveParams) / sizeof(kLiveParams[0]);
+
+  double saved[nLive];
+  for (int i = 0; i < nLive; i++)
+    saved[i] = GetParam(kLiveParams[i])->Value();
+
+  int pos = Plugin::UnserializeState(chunk, startPos);
+
+  for (int i = 0; i < nLive; i++)
+  {
+    if (GetParam(kLiveParams[i])->Value() != saved[i])
+    {
+      GetParam(kLiveParams[i])->Set(saved[i]);
+      OnParamChange(kLiveParams[i]);
+    }
+  }
+  return pos;
 }
 
 void KR106::OnIdle()

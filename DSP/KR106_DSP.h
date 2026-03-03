@@ -516,6 +516,23 @@ private:
     mHeldNotes.reset();
   }
 
+public:
+  // Force-release a single note, bypassing hold suppression.
+  // Called from the plugin's audio block when the UI explicitly toggles a key off.
+  // The note may or may not be in mHeldNotes (since OnMouseUp skips NoteOff when hold is on).
+  void ForceRelease(int noteNum)
+  {
+    mHeldNotes.reset(noteNum); // clear in case it was set
+    if (mArp.mEnabled)
+      mArp.NoteOff(noteNum);
+    else
+    {
+      IMidiMsg msg;
+      msg.MakeNoteOffMsg(noteNum, 0);
+      mSynth.AddMidiMsgToQueue(msg);
+    }
+  }
+
   template <typename F>
   void SetVoiceParam(F func)
   {

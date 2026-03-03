@@ -4,8 +4,10 @@
 #include "ISender.h"
 #include "IPlugQueue.h"
 #include "DSP/KR106_DSP.h"
+#include <atomic>
+#include <bitset>
 
-const int kNumPresets = 211;
+const int kNumPresets = 205;
 
 // Parameter indices — maps to kr106_control_t from kr106_common.h
 enum EParams
@@ -80,10 +82,18 @@ public:
   void OnReset() override;
   void OnParamChange(int paramIdx) override;
   void OnIdle() override;
+  int UnserializeState(const IByteChunk& chunk, int startPos) override;
 
 private:
   KR106DSP<sample> mDSP{6};
   IBufferSender<2> mScopeSender; // ch0=audio, ch1=osc sync
   bool mPowerOn = true;
   IPlugQueue<IMidiMsg> mMidiForKeyboard {512}; // audio→UI thread-safe MIDI display queue
+  std::atomic<bool> mHoldOff{false};     // set from UI when Hold turns off
+  std::bitset<128> mKeyboardHeld;        // visually held notes (audio thread only)
+  IPlugQueue<int> mForceRelease{16};     // notes to force-release from hold/arp (UI→audio)
+
+public:
+  // Called from UI to individually release a held note (bypasses hold suppression).
+  void ForceReleaseNote(int noteNum) { mForceRelease.Push(noteNum); }
 };
