@@ -532,7 +532,7 @@ public:
           // Hold-held notes are now owned by the arp
           mHeldNotes.reset();
         }
-        else if (!mArp.mEnabled)
+        else if (!mArp.mEnabled && wasEnabled)
         {
           // Release the currently sounding arp note immediately
           if (mArp.mLastNote >= 0)

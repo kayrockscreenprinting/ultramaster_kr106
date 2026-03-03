@@ -238,8 +238,12 @@ void KR106::ProcessBlock(sample** inputs, sample** outputs, int nFrames)
     for (int i = 0; i < nFrames; i++)
       outputs[0][i] = outputs[1][i] = sample(0);
   }
-  sample* scopeBufs[2] = { outputs[0], mDSP.GetSyncBuffer() };
-  mScopeSender.ProcessBlock(scopeBufs, nFrames, kCtrlTagScope, 2, 0);
+
+  // Feed scope: ch0 = audio (mono mix), ch1 = sync pulses
+  {
+    sample* scopeBuf[2] = { outputs[0], mDSP.GetSyncBuffer() };
+    mScopeSender.ProcessBlock(scopeBuf, nFrames, kCtrlTagScope);
+  }
 }
 
 void KR106::OnReset()
@@ -343,11 +347,11 @@ int KR106::UnserializeState(const IByteChunk& chunk, int startPos)
 
 void KR106::OnIdle()
 {
-  mScopeSender.TransmitData(*this);
-
   // Forward queued MIDI note events to the keyboard control for visual display
   if (auto* pUI = GetUI())
   {
+    mScopeSender.TransmitData(*this);
+
     auto* pKb = static_cast<KR106KeyboardControl*>(pUI->GetControlWithTag(kCtrlTagKeyboard));
     if (pKb)
     {

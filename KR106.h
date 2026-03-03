@@ -1,8 +1,8 @@
 #pragma once
 
 #include "IPlug_include_in_plug_hdr.h"
-#include "ISender.h"
 #include "IPlugQueue.h"
+#include "ISender.h"
 #include "DSP/KR106_DSP.h"
 #include <atomic>
 #include <bitset>
@@ -88,12 +88,12 @@ public:
 
 private:
   KR106DSP<sample> mDSP{6};
-  IBufferSender<2> mScopeSender; // ch0=audio, ch1=osc sync
   bool mPowerOn = true;
   IPlugQueue<IMidiMsg> mMidiForKeyboard {512}; // audio→UI thread-safe MIDI display queue
   std::atomic<bool> mHoldOff{false};     // set from UI when Hold turns off
   std::bitset<128> mKeyboardHeld;        // visually held notes (audio thread only)
   IPlugQueue<int> mForceRelease{16};     // notes to force-release from hold/arp (UI→audio)
+  IBufferSender<2> mScopeSender;
   std::atomic<int>  mTransposeOffset{0};  // semitone offset applied to all incoming MIDI notes
   std::atomic<bool> mTransposeOff{false}; // set when Transpose turns off, drained in OnIdle
 
