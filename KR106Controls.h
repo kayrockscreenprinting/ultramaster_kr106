@@ -665,15 +665,27 @@ public:
       ISenderData<2, std::array<float, MAXBUF>> buf;
       pos = stream.Get(&buf, pos);
 
-      // Append audio (ch0) and sync (ch1) to ring buffers
+      // Append audio (ch0) and sync (ch1) to ring buffers; detect silence
+      float peak = 0.f;
       for (int i = 0; i < MAXBUF; i++)
       {
+        float s = buf.vals[0][i];
+        if (s < 0.f) s = -s;
+        if (s > peak) peak = s;
         mRing[mWritePos] = buf.vals[0][i];
         mSyncRing[mWritePos] = buf.vals[1][i];
         mWritePos = (mWritePos + 1) % RING_SIZE;
       }
       mSamplesAvail += MAXBUF;
       if (mSamplesAvail > RING_SIZE) mSamplesAvail = RING_SIZE;
+
+      // If audio is silent, clear the display immediately
+      if (peak < 1e-6f)
+      {
+        mHasData = false;
+        SetDirty(false);
+        return;
+      }
 
       // Search backwards for two consecutive sync pulses — the samples
       // between them are exactly one waveform period

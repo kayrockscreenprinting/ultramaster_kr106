@@ -243,6 +243,30 @@ void KR106::OnReset()
   // Push all current parameter values to DSP on reset
   for (int i = 0; i < kNumParams; i++)
     mDSP.SetParam(i, GetParam(i)->Value());
+
+  // Re-trigger held notes after voice clear (e.g. host called AudioUnitReset on focus loss).
+  // The host re-sends its own MIDI track notes automatically; we must restore ours.
+  if (mDSP.mHold)
+  {
+    if (mDSP.mArp.mEnabled)
+    {
+      // Arp: mHeldNotes survived, just force an immediate retrigger on the next block
+      if (!mDSP.mArp.mHeldNotes.empty())
+        mDSP.mArp.mPhase = 1.f;
+    }
+    else
+    {
+      for (int i = 0; i < 128; i++)
+      {
+        if (mDSP.mHeldNotes.test(i))
+        {
+          IMidiMsg on;
+          on.MakeNoteOnMsg(i, 127, 0);
+          mDSP.mSynth.AddMidiMsgToQueue(on);
+        }
+      }
+    }
+  }
 }
 
 void KR106::ProcessMidiMsg(const IMidiMsg& msg)
