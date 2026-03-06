@@ -511,6 +511,63 @@ public:
     20864.6f, 21338.0f, 21803.4f, 22260.6f, 22709.3f, 23148.9f, 23579.3f, 24000.0f
   };
 
+  // Juno-6 ADSR lookup tables — exponential curves derived from IR3R01 specs.
+  // Attack: 0.5–3000ms (virtually instant at bottom), Decay/Release: 2–12000ms.
+  static constexpr float kAttackLUT_J6[128] = {
+    0.5f, 0.5f, 0.6f, 0.6f, 0.7f, 0.7f, 0.8f, 0.8f,
+    0.9f, 0.9f, 1.0f, 1.1f, 1.1f, 1.2f, 1.3f, 1.4f,
+    1.5f, 1.6f, 1.7f, 1.8f, 2.0f, 2.1f, 2.3f, 2.4f,
+    2.6f, 2.8f, 3.0f, 3.2f, 3.4f, 3.6f, 3.9f, 4.2f,
+    4.5f, 4.8f, 5.1f, 5.5f, 5.9f, 6.3f, 6.8f, 7.2f,
+    7.7f, 8.3f, 8.9f, 9.5f, 10.2f, 10.9f, 11.7f, 12.5f,
+    13.4f, 14.3f, 15.4f, 16.5f, 17.6f, 18.9f, 20.2f, 21.6f,
+    23.2f, 24.8f, 26.6f, 28.5f, 30.5f, 32.6f, 34.9f, 37.4f,
+    40.1f, 42.9f, 46.0f, 49.2f, 52.7f, 56.5f, 60.5f, 64.7f,
+    69.3f, 74.2f, 79.5f, 85.1f, 91.2f, 97.6f, 104.6f, 112.0f,
+    119.9f, 128.4f, 137.5f, 147.3f, 157.7f, 168.9f, 180.9f, 193.7f,
+    207.4f, 222.2f, 237.9f, 254.8f, 272.8f, 292.2f, 312.9f, 335.1f,
+    358.8f, 384.3f, 411.5f, 440.7f, 471.9f, 505.4f, 541.2f, 579.6f,
+    620.7f, 664.7f, 711.8f, 762.3f, 816.4f, 874.2f, 936.2f, 1002.6f,
+    1073.7f, 1149.8f, 1231.3f, 1318.7f, 1412.1f, 1512.3f, 1619.5f, 1734.3f,
+    1857.3f, 1989.0f, 2130.0f, 2281.0f, 2442.7f, 2615.9f, 2801.4f, 3000.0f
+  };
+  static constexpr float kDecayLUT_J6[128] = {
+    2.0f, 2.1f, 2.3f, 2.5f, 2.6f, 2.8f, 3.0f, 3.2f,
+    3.5f, 3.7f, 4.0f, 4.2f, 4.6f, 4.9f, 5.2f, 5.6f,
+    6.0f, 6.4f, 6.9f, 7.3f, 7.9f, 8.4f, 9.0f, 9.7f,
+    10.4f, 11.1f, 11.9f, 12.7f, 13.6f, 14.6f, 15.6f, 16.7f,
+    17.9f, 19.2f, 20.5f, 22.0f, 23.6f, 25.2f, 27.0f, 28.9f,
+    31.0f, 33.2f, 35.5f, 38.0f, 40.7f, 43.6f, 46.7f, 50.0f,
+    53.6f, 57.4f, 61.4f, 65.8f, 70.5f, 75.5f, 80.8f, 86.5f,
+    92.7f, 99.3f, 106.3f, 113.8f, 121.9f, 130.5f, 139.8f, 149.7f,
+    160.3f, 171.7f, 183.9f, 196.9f, 210.9f, 225.8f, 241.8f, 259.0f,
+    277.3f, 297.0f, 318.0f, 340.6f, 364.7f, 390.6f, 418.3f, 447.9f,
+    479.7f, 513.7f, 550.1f, 589.1f, 630.9f, 675.6f, 723.5f, 774.8f,
+    829.8f, 888.6f, 951.6f, 1019.1f, 1091.3f, 1168.7f, 1251.6f, 1340.3f,
+    1435.3f, 1537.1f, 1646.1f, 1762.8f, 1887.8f, 2021.6f, 2165.0f, 2318.5f,
+    2482.8f, 2658.9f, 2847.4f, 3049.3f, 3265.5f, 3497.0f, 3744.9f, 4010.5f,
+    4294.8f, 4599.3f, 4925.4f, 5274.6f, 5648.6f, 6049.1f, 6478.0f, 6937.3f,
+    7429.1f, 7955.8f, 8519.9f, 9124.0f, 9770.9f, 10463.6f, 11205.5f, 12000.0f
+  };
+  static constexpr float kReleaseLUT_J6[128] = {
+    2.0f, 2.1f, 2.3f, 2.5f, 2.6f, 2.8f, 3.0f, 3.2f,
+    3.5f, 3.7f, 4.0f, 4.2f, 4.6f, 4.9f, 5.2f, 5.6f,
+    6.0f, 6.4f, 6.9f, 7.3f, 7.9f, 8.4f, 9.0f, 9.7f,
+    10.4f, 11.1f, 11.9f, 12.7f, 13.6f, 14.6f, 15.6f, 16.7f,
+    17.9f, 19.2f, 20.5f, 22.0f, 23.6f, 25.2f, 27.0f, 28.9f,
+    31.0f, 33.2f, 35.5f, 38.0f, 40.7f, 43.6f, 46.7f, 50.0f,
+    53.6f, 57.4f, 61.4f, 65.8f, 70.5f, 75.5f, 80.8f, 86.5f,
+    92.7f, 99.3f, 106.3f, 113.8f, 121.9f, 130.5f, 139.8f, 149.7f,
+    160.3f, 171.7f, 183.9f, 196.9f, 210.9f, 225.8f, 241.8f, 259.0f,
+    277.3f, 297.0f, 318.0f, 340.6f, 364.7f, 390.6f, 418.3f, 447.9f,
+    479.7f, 513.7f, 550.1f, 589.1f, 630.9f, 675.6f, 723.5f, 774.8f,
+    829.8f, 888.6f, 951.6f, 1019.1f, 1091.3f, 1168.7f, 1251.6f, 1340.3f,
+    1435.3f, 1537.1f, 1646.1f, 1762.8f, 1887.8f, 2021.6f, 2165.0f, 2318.5f,
+    2482.8f, 2658.9f, 2847.4f, 3049.3f, 3265.5f, 3497.0f, 3744.9f, 4010.5f,
+    4294.8f, 4599.3f, 4925.4f, 5274.6f, 5648.6f, 6049.1f, 6478.0f, 6937.3f,
+    7429.1f, 7955.8f, 8519.9f, 9124.0f, 9770.9f, 10463.6f, 11205.5f, 12000.0f
+  };
+
   // Linearly interpolate a 128-entry LUT from a 0-1 slider value
   static float LookupLUT(const float* lut, float s)
   {
@@ -536,7 +593,8 @@ public:
       kVcfEnvInv, kVcaMode,
       kBender, kTuning, kPower,
       kPortaMode, kPortaRate,
-      kTransposeOffset, kBenderLfo
+      kTransposeOffset, kBenderLfo,
+      kAdsrMode
     };
 
     switch (paramIdx)
@@ -581,14 +639,20 @@ public:
         SetVoiceParam([value](kr106::Voice<T>& v) { v.mBendLfo = static_cast<float>(value); });
         break;
 
-      // --- ADSR (slider 0-1 → ms via measured LUT, Juno-106 official ranges) ---
+      // --- ADSR (slider 0-1 → ms via LUT; 0=Juno-6, 1=Juno-106) ---
       case kEnvA: {
-        float ms = LookupLUT(kAttackLUT, static_cast<float>(value));
-        SetVoiceParam([ms](kr106::Voice<T>& v) { v.mADSR.SetAttack(ms); });
+        mSliderA = static_cast<float>(value);
+        bool j6 = (mAdsrMode == 0);
+        float ms = LookupLUT(j6 ? kAttackLUT_J6 : kAttackLUT, mSliderA);
+        if (j6)
+          SetVoiceParam([ms](kr106::Voice<T>& v) { v.mADSR.SetAttackExp(ms); });
+        else
+          SetVoiceParam([ms](kr106::Voice<T>& v) { v.mADSR.SetAttack(ms); });
         break;
       }
       case kEnvD: {
-        float ms = LookupLUT(kDecayLUT, static_cast<float>(value));
+        mSliderD = static_cast<float>(value);
+        float ms = LookupLUT(mAdsrMode == 0 ? kDecayLUT_J6 : kDecayLUT, mSliderD);
         SetVoiceParam([ms](kr106::Voice<T>& v) { v.mADSR.SetDecay(ms); });
         break;
       }
@@ -598,7 +662,8 @@ public:
         break;
       }
       case kEnvR: {
-        float ms = LookupLUT(kReleaseLUT, static_cast<float>(value));
+        mSliderR = static_cast<float>(value);
+        float ms = LookupLUT(mAdsrMode == 0 ? kReleaseLUT_J6 : kReleaseLUT, mSliderR);
         SetVoiceParam([ms](kr106::Voice<T>& v) { v.mADSR.SetRelease(ms); });
         break;
       }
@@ -626,6 +691,16 @@ public:
       case kVcaMode:
         SetVoiceParam([value](kr106::Voice<T>& v) { v.mVcaMode = static_cast<int>(value); });
         break;
+      case kAdsrMode: {
+        mAdsrMode = static_cast<int>(value);
+        bool expAtk = (mAdsrMode == 0); // 0=Juno-6 (exponential attack)
+        SetVoiceParam([expAtk](kr106::Voice<T>& v) { v.mADSR.mExponentialAttack = expAtk; });
+        // Re-apply ADSR sliders with the new LUT set
+        SetParam(kEnvA, mSliderA);
+        SetParam(kEnvD, mSliderD);
+        SetParam(kEnvR, mSliderR);
+        break;
+      }
       case kBender:
         SetVoiceParam([value](kr106::Voice<T>& v) { v.mRawBend = static_cast<float>(value); });
         break;
@@ -856,6 +931,10 @@ public:
   int mRoundRobinNext = 0;                 // round-robin rotation index for mode 2
   bool mChorusI = false;
   bool mChorusII = false;
+  int mAdsrMode = 0;          // 0 = Juno-106, 1 = Juno-6
+  float mSliderA = 0.25f;     // cached ADSR slider values for mode-switch re-apply
+  float mSliderD = 0.25f;
+  float mSliderR = 0.25f;
 
   std::bitset<128> mHeldNotes;   // for Hold button release tracking
   std::bitset<128> mKeysDown;    // physical key state (for arp seeding)

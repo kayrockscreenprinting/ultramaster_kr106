@@ -63,6 +63,9 @@ enum EParams
   kTransposeOffset, // semitone offset applied by keyboard transpose (-24..+36)
   kBenderLfo,       // SL_BENDER_LFO
 
+  // New params (appended to preserve preset compatibility)
+  kAdsrMode,        // SW_ADSR_MODE (0=Juno-6, 1=Juno-106)
+
   kNumParams
 };
 

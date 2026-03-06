@@ -15,8 +15,9 @@ KR106::KR106(const InstanceInfo& info)
     else s.SetFormatted(32, "%.0f Hz", hz);
   };
 
-  auto dispMs = [](const float* lut) {
-    return [lut](double v, WDL_String& s) {
+  auto dispMs = [this](const float* lut106, const float* lut6) {
+    return [this, lut106, lut6](double v, WDL_String& s) {
+      const float* lut = GetParam(kAdsrMode)->Bool() ? lut106 : lut6; // 0=J6, 1=J106
       float ms = KR106DSP<float>::LookupLUT(lut, static_cast<float>(v));
       if (ms >= 1000.f) s.SetFormatted(32, "%.2f s", ms / 1000.f);
       else s.SetFormatted(32, "%.0f ms", ms);
@@ -80,9 +81,9 @@ KR106::KR106(const InstanceInfo& info)
   GetParam(kHpfFreq)->InitInt("HPF", 1, 0, 3);
 
   // --- ADSR: raw 0-1 slider values; DSP applies curve + range via LUT ---
-  GetParam(kEnvA)->InitDouble("Attack", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kAttackLUT));
-  GetParam(kEnvD)->InitDouble("Decay", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kDecayLUT));
-  GetParam(kEnvR)->InitDouble("Release", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kReleaseLUT));
+  GetParam(kEnvA)->InitDouble("Attack", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kAttackLUT, KR106DSP<float>::kAttackLUT_J6));
+  GetParam(kEnvD)->InitDouble("Decay", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kDecayLUT, KR106DSP<float>::kDecayLUT_J6));
+  GetParam(kEnvR)->InitDouble("Release", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kReleaseLUT, KR106DSP<float>::kReleaseLUT_J6));
 
   // --- Buttons (toggle 0/1) ---
   GetParam(kTranspose)->InitBool("Transpose", false);
@@ -103,6 +104,7 @@ KR106::KR106(const InstanceInfo& info)
   GetParam(kPwmMode)->InitInt("PWM Mode", 1, 0, 2); // LFO=0, MAN=1, ENV=2
   GetParam(kVcfEnvInv)->InitInt("VCF Env Inv", 0, 0, 1);
   GetParam(kVcaMode)->InitInt("VCA Mode", 0, 0, 1);
+  GetParam(kAdsrMode)->InitInt("ADSR Mode", 1, 0, 1); // 0=Juno-6(left), 1=Juno-106(right)
 
   // --- Special ---
   GetParam(kBender)->InitDouble("Bender", 0., -1., 1., 0.01, "");
@@ -132,6 +134,7 @@ KR106::KR106(const InstanceInfo& info)
     const IBitmap switch3wayBitmap = pGraphics->LoadBitmap(SWITCH_3WAY_FN, 3);
     const IBitmap ledBitmap = pGraphics->LoadBitmap(LED_RED_FN, 2);
     const IBitmap transposeChevronBitmap = pGraphics->LoadBitmap(TRANSPOSE_CHEVRON_FN);
+    const IBitmap switch2wayHorizBitmap = pGraphics->LoadBitmap(SWITCH_2WAY_HORIZ_FN, 2);
 
     // Background panel
     pGraphics->AttachControl(new IBitmapControl(0, 0, bgBitmap));
@@ -217,6 +220,8 @@ KR106::KR106(const InstanceInfo& info)
     pGraphics->AttachControl(new KR106SliderControl(IRECT(676, 33, 689, 82), kEnvD));
     pGraphics->AttachControl(new KR106SliderControl(IRECT(695, 33, 708, 82), kEnvS));
     pGraphics->AttachControl(new KR106SliderControl(IRECT(713, 33, 726, 82), kEnvR));
+    // ADSR mode switch: left=Juno-6, right=Juno-106
+    pGraphics->AttachControl(new KR106HorizontalSwitchControl(IRECT(668, 80, 716, 98), switch2wayHorizBitmap, kAdsrMode));
 
     // === CHORUS SECTION ===
     // Chorus Off is a plain button (no LED), Chorus I and II have LEDs

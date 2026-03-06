@@ -157,13 +157,16 @@ struct ADSR
 {
   enum State { kAttack, kDecay, kSustain, kRelease, kFinished };
   static constexpr float kGateSlope = 1.f / 32.f;
-  static constexpr float kMinLevel  = 0.001f;  // -60dB: calibrates decay/release time constants
-  static constexpr float kSilence   = 1e-5f;   // -100dB: release termination threshold
+  static constexpr float kMinLevel     = 0.001f;  // -60dB: calibrates decay/release time constants
+  static constexpr float kSilence      = 1e-5f;   // -100dB: release termination threshold
+  static constexpr float kAttackTarget = 1.5f;     // RC charge target (above comparator threshold of 1.0)
 
   State mState = kFinished;
   float mEnv = 0.f;
   float mGateEnv = 0.f;
-  float mAttackRate = 0.f;   // linear per-sample increment
+  float mAttackRate = 0.f;   // linear per-sample increment (Juno-106 mode)
+  float mAttackCoeff = 0.f;  // one-pole RC coefficient (Juno-6 mode)
+  bool  mExponentialAttack = false; // true = Juno-6 RC charging attack
   float mDecayRate = 0.f;    // linear rate (for sustain tracking)
   float mDecayMul = 1.f;     // fixed exponential multiplier (toward 0)
   float mSustain = 1.f;
@@ -176,6 +179,14 @@ struct ADSR
   void SetAttack(float ms)
   {
     mAttackRate = 1000.f / (ms * mTimeScale * mSampleRate);
+  }
+
+  // Juno-6 exponential attack: RC charge toward kAttackTarget (1.5),
+  // reaching 1.0 in exactly ms milliseconds
+  void SetAttackExp(float ms)
+  {
+    float T = ms * mTimeScale * mSampleRate / 1000.f;
+    mAttackCoeff = 1.f - expf(-logf(3.f) / T);
   }
 
   void SetDecay(float ms)
@@ -204,16 +215,13 @@ struct ADSR
     switch (mState)
     {
       case kAttack:
-        mEnv += mAttackRate;
+        if (mExponentialAttack)
+          mEnv += (kAttackTarget - mEnv) * mAttackCoeff; // Juno-6: RC charge curve
+        else
+          mEnv += mAttackRate; // Juno-106: linear ramp (overshoot ~2-3% at 1ms)
         mGateEnv += kGateSlope;
         if (mEnv >= 1.f)
-        {
-          // Don't clamp to 1.0 — natural overshoot from the linear
-          // ramp continuing past the comparator threshold. Models
-          // the IR3R01's propagation delay before switching state.
-          // At 1ms attack, overshoot is ~2-3%.
           mState = kDecay;
-        }
         break;
 
       case kDecay:

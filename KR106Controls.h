@@ -613,6 +613,56 @@ private:
 };
 
 // ============================================================================
+// KR106HorizontalSwitchControl — 2-position horizontal toggle
+// Uses a pre-rotated bitmap sprite sheet (2 frames, horizontal layout)
+
+class KR106HorizontalSwitchControl : public IControl, public IBitmapBase
+{
+public:
+  KR106HorizontalSwitchControl(const IRECT& bounds, const IBitmap& bitmap, int paramIdx)
+  : IControl(bounds, paramIdx)
+  , IBitmapBase(bitmap)
+  {
+    mControl = this;
+  }
+
+  void Draw(IGraphics& g) override { DrawBitmap(g); }
+  void OnRescale() override { mBitmap = GetUI()->GetScaledBitmap(mBitmap); }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    mDragStartX = x;
+    mDragged = false;
+  }
+
+  void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
+  {
+    float totalDrag = x - mDragStartX;
+    if (std::abs(totalDrag) > 3.f) mDragged = true;
+
+    if (totalDrag > (float)mBitmap.FW() * 0.25f)
+      SetValue(1.0);
+    else if (totalDrag < -(float)mBitmap.FW() * 0.25f)
+      SetValue(0.0);
+
+    SetDirty(true);
+  }
+
+  void OnMouseUp(float x, float y, const IMouseMod& mod) override
+  {
+    if (!mDragged)
+    {
+      SetValue(GetValue() < 0.5 ? 1.0 : 0.0);
+      SetDirty(true);
+    }
+  }
+
+private:
+  float mDragStartX = 0.f;
+  bool mDragged = false;
+};
+
+// ============================================================================
 // KR106ScopeControl — oscilloscope display (green waveform on black)
 // Triggered by oscillator sync pulse (ch1) like original scope_buffer.c
 // ============================================================================
