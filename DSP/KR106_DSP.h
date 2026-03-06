@@ -927,6 +927,18 @@ public:
     SetVoiceParam([semi](kr106::Voice<T>& v) { v.mOctTranspose = semi; });
   }
 
+  // Kill all sounding notes, clear held/arp state. Called on power-off.
+  void PowerOff()
+  {
+    mArp.Reset();
+    mKeysDown.reset();
+    mHeldNotes.reset();
+    // Send All Notes Off (CC123) to release all synth voices
+    IMidiMsg msg;
+    msg.MakeControlChangeMsg(IMidiMsg::kAllNotesOff, 0, 0);
+    mSynth.AddMidiMsgToQueue(msg);
+  }
+
   // Force-release a single note, bypassing hold suppression.
   // Called from the plugin's audio block when the UI explicitly toggles a key off.
   // The note may or may not be in mHeldNotes (since OnMouseUp skips NoteOff when hold is on).

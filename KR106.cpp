@@ -6,40 +6,83 @@
 KR106::KR106(const InstanceInfo& info)
 : iplug::Plugin(info, MakeConfig(kNumParams, kNumPresets))
 {
-  // --- Sliders: 0-1 internal, displayed as 0-10 (Juno-106 panel scale) ---
-  auto disp10 = [](double v, WDL_String& s) { s.SetFormatted(32, "%.1f", v * 10.0); };
+  // --- Display formatters ---
+  auto dispPct = [](double v, WDL_String& s) { s.SetFormatted(32, "%.0f%%", v * 100.0); };
 
-  GetParam(kBenderDco)->InitDouble("Bender DCO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kBenderVcf)->InitDouble("Bender VCF", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kLfoDelay)->InitDouble("LFO Delay", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kDcoLfo)->InitDouble("DCO LFO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kDcoPwm)->InitDouble("DCO PWM", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kDcoSub)->InitDouble("DCO Sub", 1., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kDcoNoise)->InitDouble("DCO Noise", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
   auto dispVcfHz = [](double v, WDL_String& s) {
     double hz = 20.0 * std::pow(900.0, v);
     if (hz >= 1000.0) s.SetFormatted(32, "%.1f kHz", hz / 1000.0);
     else s.SetFormatted(32, "%.0f Hz", hz);
   };
+
+  auto dispMs = [](const float* lut) {
+    return [lut](double v, WDL_String& s) {
+      float ms = KR106DSP<float>::LookupLUT(lut, static_cast<float>(v));
+      if (ms >= 1000.f) s.SetFormatted(32, "%.2f s", ms / 1000.f);
+      else s.SetFormatted(32, "%.0f ms", ms);
+    };
+  };
+
+  auto dispLfoRate = [](double v, WDL_String& s) {
+    double hz = (18.0 + v * 1182.0) / 60.0;
+    s.SetFormatted(32, "%.1f Hz", hz);
+  };
+
+  auto dispLfoDelay = [](double v, WDL_String& s) {
+    if (v <= 0.0) s.Set("Off");
+    else s.SetFormatted(32, "%.0f ms", v * 1500.0);
+  };
+
+  auto dispVcaLevel = [](double v, WDL_String& s) {
+    double dB = (v * 2.0 - 1.0) * 6.0;
+    if (dB >= 0.0) s.SetFormatted(32, "+%.1f dB", dB);
+    else s.SetFormatted(32, "%.1f dB", dB);
+  };
+
+  auto dispArpBpm = [](double v, WDL_String& s) {
+    s.SetFormatted(32, "%.0f bpm", v);
+  };
+
+  auto dispTuning = [](double v, WDL_String& s) {
+    double cents = v * 100.0;
+    if (cents >= 0.0) s.SetFormatted(32, "+%.0f cents", cents);
+    else s.SetFormatted(32, "%.0f cents", cents);
+  };
+
+  auto dispPorta = [](double v, WDL_String& s) {
+    if (v < 0.01) { s.Set("Off"); return; }
+    double t = v * v * v * 3.0 * 1000.0; // ms
+    if (t >= 1000.0) s.SetFormatted(32, "%.2f s", t / 1000.0);
+    else s.SetFormatted(32, "%.0f ms", t);
+  };
+
+  // --- Sliders ---
+  GetParam(kBenderDco)->InitDouble("Bender DCO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kBenderVcf)->InitDouble("Bender VCF", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kLfoDelay)->InitDouble("LFO Delay", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispLfoDelay);
+  GetParam(kDcoLfo)->InitDouble("DCO LFO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kDcoPwm)->InitDouble("DCO PWM", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kDcoSub)->InitDouble("DCO Sub", 1., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kDcoNoise)->InitDouble("DCO Noise", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
   GetParam(kVcfFreq)->InitDouble("VCF Freq", 0.5, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispVcfHz);
-  GetParam(kVcfRes)->InitDouble("VCF Res", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kVcfEnv)->InitDouble("VCF Env", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kVcfLfo)->InitDouble("VCF LFO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kVcfKbd)->InitDouble("VCF Kbd", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kEnvS)->InitDouble("Sustain", 0.9, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
+  GetParam(kVcfRes)->InitDouble("VCF Res", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kVcfEnv)->InitDouble("VCF Env", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kVcfLfo)->InitDouble("VCF LFO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kVcfKbd)->InitDouble("VCF Kbd", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
+  GetParam(kEnvS)->InitDouble("Sustain", 0.9, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
 
-  GetParam(kVcaLevel)->InitDouble("Volume", 0.5, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
+  GetParam(kVcaLevel)->InitDouble("Volume", 0.5, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispVcaLevel);
 
-  GetParam(kArpRate)->InitDouble("Arp Rate", 120., 90., 3000., 0.1, "BPM"); // 1.5–50 Hz
-  GetParam(kLfoRate)->InitDouble("LFO Rate", 0.24, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
+  GetParam(kArpRate)->InitDouble("Arp Rate", 120., 15., 1800., 0.1, "", IParam::kFlagsNone, "", IParam::ShapeExp(), IParam::kUnitCustom, dispArpBpm);
+  GetParam(kLfoRate)->InitDouble("LFO Rate", 0.24, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispLfoRate);
 
   // --- 4-position HPF switch: 0=bass boost, 1=flat, 2=HPF 240Hz, 3=HPF 720Hz ---
   GetParam(kHpfFreq)->InitInt("HPF", 1, 0, 3);
 
-  // --- ADSR: raw 0-1 slider values (displayed as 0-10); DSP applies curve + range ---
-  GetParam(kEnvA)->InitDouble("Attack", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kEnvD)->InitDouble("Decay", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
-  GetParam(kEnvR)->InitDouble("Release", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, disp10);
+  // --- ADSR: raw 0-1 slider values; DSP applies curve + range via LUT ---
+  GetParam(kEnvA)->InitDouble("Attack", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kAttackLUT));
+  GetParam(kEnvD)->InitDouble("Decay", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kDecayLUT));
+  GetParam(kEnvR)->InitDouble("Release", 0.25, 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispMs(KR106DSP<float>::kReleaseLUT));
 
   // --- Buttons (toggle 0/1) ---
   GetParam(kTranspose)->InitBool("Transpose", false);
@@ -63,12 +106,12 @@ KR106::KR106(const InstanceInfo& info)
 
   // --- Special ---
   GetParam(kBender)->InitDouble("Bender", 0., -1., 1., 0.01, "");
-  GetParam(kTuning)->InitDouble("Tuning", 0., -1., 1., 0.01, "");
+  GetParam(kTuning)->InitDouble("Tuning", 0., -1., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispTuning);
   GetParam(kPower)->InitBool("Power", true);
   GetParam(kPortaMode)->InitInt("Porta Mode", 2, 0, 2); // default 2 = switch down = Poly
-  GetParam(kPortaRate)->InitDouble("Porta Rate", 0., 0., 1., 0.01, "");
+  GetParam(kPortaRate)->InitDouble("Porta Rate", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPorta);
   GetParam(kTransposeOffset)->InitInt("Transpose Offset", 0, -24, 36);
-  GetParam(kBenderLfo)->InitDouble("Bender LFO", 0., 0., 1., 0.01, "");
+  GetParam(kBenderLfo)->InitDouble("Bender LFO", 0., 0., 1., 0.01, "", IParam::kFlagsNone, "", IParam::ShapeLinear(), IParam::kUnitCustom, dispPct);
 
 #include "KR106_Presets.h"
 
@@ -444,6 +487,11 @@ void KR106::OnParamChange(int paramIdx)
   if (paramIdx == kPower)
   {
     mPowerOn = GetParam(kPower)->Bool();
+    if (!mPowerOn)
+    {
+      mDSP.PowerOff();
+      mHoldOff = true; // release visually held keyboard keys
+    }
     if (auto* pUI = GetUI())
       pUI->SetAllControlsDirty();
   }

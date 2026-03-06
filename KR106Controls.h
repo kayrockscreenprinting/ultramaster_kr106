@@ -35,7 +35,9 @@ class KR106KnobControl : public IBKnobControl
 public:
   KR106KnobControl(float x, float y, const IBitmap& bitmap, int paramIdx)
   : IBKnobControl(x, y, bitmap, paramIdx, EDirection::Vertical)
-  {}
+  {
+    SetActionFunction(ShowBubbleVerticalActionFunc);
+  }
 
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
@@ -43,7 +45,16 @@ public:
     IBKnobControl::OnMouseDown(x, y, mod);
   }
 
-  void OnMouseDblClick(float x, float y, const IMouseMod& mod) override { /* no reset */ }
+  void OnMouseDblClick(float x, float y, const IMouseMod& mod) override
+  {
+    const IParam* pParam = GetParam();
+    if (pParam)
+    {
+      SetValue(pParam->GetDefault(true));
+      mMouseDragValue = GetValue();
+      SetDirty();
+    }
+  }
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
