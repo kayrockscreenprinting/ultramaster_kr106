@@ -1,67 +1,70 @@
-PROJECT  = projects/KR106-macOS.xcodeproj
-CONFIG  ?= Debug
+BUILD_DIR = build-juce
+CONFIG   ?= Debug
 
-# ── Targets ──────────────────────────────────────────────────────────────────
+# ── JUCE / CMake targets ─────────────────────────────────────────────────────
 
-.PHONY: app vst3 au clap all clean presets reaper help check-iplug2
+.PHONY: build run reaper clean help
 
-app: check-iplug2
-	xcodebuild -project "$(PROJECT)" -target APP -configuration $(CONFIG)
+build:
+	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CONFIG)
+	cmake --build $(BUILD_DIR) --config $(CONFIG)
 
-vst3: check-iplug2
-	xcodebuild -project "$(PROJECT)" -target VST3 -configuration $(CONFIG)
+run: build
+	open $(BUILD_DIR)/KR106_artefacts/$(CONFIG)/Standalone/KR106.app
 
-au: check-iplug2
-	xcodebuild -project "$(PROJECT)" -target AU -configuration $(CONFIG)
-
-clap: check-iplug2
-	xcodebuild -project "$(PROJECT)" -target CLAP -configuration $(CONFIG)
-
-all: check-iplug2
-	xcodebuild -project "$(PROJECT)" -target All -configuration $(CONFIG)
-
-reaper: vst3
+reaper: build
 	@echo "Restarting Reaper with fresh VST cache..."
 	-killall REAPER 2>/dev/null; sleep 1
 	rm -f "$(HOME)/Library/Application Support/REAPER/reaper-vstplugins64.ini"
 	open -a REAPER
 
 clean:
+	rm -rf $(BUILD_DIR)
+
+# ── iPlug2 / Xcode targets (legacy) ──────────────────────────────────────────
+
+IPLUG_PROJECT = projects/KR106-macOS.xcodeproj
+
+.PHONY: iplug-app iplug-vst3 iplug-au iplug-all iplug-clean check-iplug2
+
+iplug-app: check-iplug2
+	xcodebuild -project "$(IPLUG_PROJECT)" -target APP -configuration $(CONFIG)
+
+iplug-vst3: check-iplug2
+	xcodebuild -project "$(IPLUG_PROJECT)" -target VST3 -configuration $(CONFIG)
+
+iplug-au: check-iplug2
+	xcodebuild -project "$(IPLUG_PROJECT)" -target AU -configuration $(CONFIG)
+
+iplug-all: check-iplug2
+	xcodebuild -project "$(IPLUG_PROJECT)" -target All -configuration $(CONFIG)
+
+iplug-clean:
 	rm -rf build-mac
 	find "$(HOME)/Library/Developer/Xcode/DerivedData" -maxdepth 1 -name 'KR106-macOS-*' -exec rm -rf {} +
-	rm -rf "$(HOME)/Applications/KR106.app"
-	rm -rf "$(HOME)/Library/Audio/Plug-Ins/Components/KR106.component"
-	rm -rf "$(HOME)/Library/Audio/Plug-Ins/VST3/KR106.vst3"
-	rm -rf "$(HOME)/Library/Audio/Plug-Ins/CLAP/KR106.clap"
-
-presets:
-	@echo "Preset generation disabled — KR106_Presets.h is pre-built."
-	@echo "Source files are in tools/preset-gen/ if you need to regenerate."
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 check-iplug2:
 	@test -f ../iPlug2/common-mac.xcconfig || \
-	  (echo ""; \
-	   echo "ERROR: iPlug2 not found at ../iPlug2"; \
-	   echo "Clone iPlug2 as a sibling directory:"; \
-	   echo "  cd .. && git clone https://github.com/iPlug2/iPlug2"; \
-	   echo ""; exit 1)
+	  (echo "ERROR: iPlug2 not found at ../iPlug2"; exit 1)
+
+# ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
 	@echo ""
-	@echo "Ultramaster KR-106 — build targets"
+	@echo "Ultramaster KR-106"
 	@echo ""
-	@echo "  make app          Standalone .app (default: Debug)"
-	@echo "  make vst3         VST3 plugin"
-	@echo "  make au           Audio Unit (AUv2)"
-	@echo "  make clap         CLAP plugin"
-	@echo "  make all          All formats"
-	@echo "  make clean        Remove build artifacts"
-	@echo "  make reaper       Build VST3, restart Reaper with fresh cache"
-	@echo "  make presets      Regenerate KR106_Presets.h from patch files"
+	@echo "  JUCE (CMake):"
+	@echo "    make build        Build all formats (AU, VST3, LV2, Standalone)"
+	@echo "    make run          Build and launch Standalone"
+	@echo "    make reaper       Restart Reaper with fresh VST cache"
+	@echo "    make clean        Remove build directory"
 	@echo ""
-	@echo "  CONFIG=Release make vst3   — release build"
+	@echo "  iPlug2 (Xcode, legacy):"
+	@echo "    make iplug-app    Standalone .app"
+	@echo "    make iplug-vst3   VST3 plugin"
+	@echo "    make iplug-au     Audio Unit"
+	@echo "    make iplug-all    All formats"
+	@echo "    make iplug-clean  Remove Xcode build artifacts"
 	@echo ""
-	@echo "Requires: Xcode, iPlug2 cloned as sibling at ../iPlug2 (see README)"
+	@echo "  CONFIG=Release make build  — release build"
 	@echo ""

@@ -8,6 +8,7 @@ Icon?
 *.mode1v3
 DerivedData/
 build-*
+build/
 
 # Visual Studio
 *.vs
