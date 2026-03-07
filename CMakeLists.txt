@@ -3,6 +3,15 @@ project(KR106 VERSION 1.0.0)
 
 add_subdirectory(libs/JUCE)
 
+# Platform-specific plugin formats
+if(APPLE)
+    set(KR106_FORMATS AU VST3 Standalone)
+elseif(UNIX)
+    set(KR106_FORMATS VST3 LV2 Standalone)
+else()
+    set(KR106_FORMATS VST3 Standalone)
+endif()
+
 juce_add_plugin(KR106
     COMPANY_NAME "Kayrock"
     IS_SYNTH TRUE
@@ -10,7 +19,7 @@ juce_add_plugin(KR106
     NEEDS_MIDI_OUTPUT TRUE
     PLUGIN_MANUFACTURER_CODE Krok
     PLUGIN_CODE Kr16
-    FORMATS VST3 Standalone $<$<PLATFORM_ID:Darwin>:AU> $<$<PLATFORM_ID:Linux>:LV2>
+    FORMATS ${KR106_FORMATS}
     PRODUCT_NAME "KR106"
     LV2URI "https://kayrock.org/kr106"
     COPY_PLUGIN_AFTER_BUILD TRUE

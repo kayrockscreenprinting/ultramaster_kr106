@@ -3,6 +3,7 @@ name: Build Linux
 on:
   push:
     branches: [main]
+    tags-ignore: ['v*']
   pull_request:
     branches: [main]
 
