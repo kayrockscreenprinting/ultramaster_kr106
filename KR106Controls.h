@@ -632,19 +632,24 @@ public:
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
     mDragStartX = x;
+    mDragStartIdx = CurrentIdx();
     mDragged = false;
   }
 
   void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
   {
+    int n = mBitmap.N();
+    if (n <= 1) return;
+
     float totalDrag = x - mDragStartX;
     if (std::abs(totalDrag) > 3.f) mDragged = true;
 
-    if (totalDrag > (float)mBitmap.FW() * 0.25f)
-      SetValue(1.0);
-    else if (totalDrag < -(float)mBitmap.FW() * 0.25f)
-      SetValue(0.0);
+    int steps = (int)(totalDrag / ((float)mBitmap.FW() * 0.5f));
+    int newIdx = mDragStartIdx + steps;
+    if (newIdx < 0) newIdx = 0;
+    if (newIdx >= n) newIdx = n - 1;
 
+    SetValue((double)newIdx / (double)(n - 1));
     SetDirty(true);
   }
 
@@ -652,13 +657,25 @@ public:
   {
     if (!mDragged)
     {
-      SetValue(GetValue() < 0.5 ? 1.0 : 0.0);
+      int n = mBitmap.N();
+      if (n > 1)
+      {
+        int idx = CurrentIdx() + 1;
+        if (idx >= n) idx = 0;
+        SetValue((double)idx / (double)(n - 1));
+      }
       SetDirty(true);
     }
   }
 
 private:
+  int CurrentIdx() const
+  {
+    return (int)(0.5 + GetValue() * (double)(mBitmap.N() - 1));
+  }
+
   float mDragStartX = 0.f;
+  int mDragStartIdx = 0;
   bool mDragged = false;
 };
 

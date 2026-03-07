@@ -135,6 +135,7 @@ KR106::KR106(const InstanceInfo& info)
     const IBitmap ledBitmap = pGraphics->LoadBitmap(LED_RED_FN, 2);
     const IBitmap transposeChevronBitmap = pGraphics->LoadBitmap(TRANSPOSE_CHEVRON_FN);
     const IBitmap switch2wayHorizBitmap = pGraphics->LoadBitmap(SWITCH_2WAY_HORIZ_FN, 2);
+    const IBitmap switch3wayHorizBitmap = pGraphics->LoadBitmap(SWITCH_3WAY_HORIZ_FN, 3);
 
     // Background panel
     pGraphics->AttachControl(new IBitmapControl(0, 0, bgBitmap));
@@ -163,8 +164,8 @@ KR106::KR106(const InstanceInfo& info)
     // Pitch bend lever (66, 206) — 60x8 spring-back horizontal
     pGraphics->AttachControl(new KR106BenderControl(IRECT(66, 206, 126, 214), kBender, benderGradient));
 
-    // Octave transpose 3-way switch (65, 144)
-    pGraphics->AttachControl(new KR106SwitchControl(74, 144, switch3wayBitmap, kOctTranspose));
+    // Octave transpose 3-way horizontal switch (under DCO waveform buttons)
+    pGraphics->AttachControl(new KR106HorizontalSwitchControl(IRECT(389, 84, 413, 93), switch3wayHorizBitmap, kOctTranspose));
 
     // === ARPEGGIATOR SECTION ===
     // Transpose button+LED (95, 52), Hold (122, 52), Arp (154, 52)

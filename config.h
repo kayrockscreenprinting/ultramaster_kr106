@@ -65,3 +65,4 @@
 #define BENDER_GRADIENT_FN "kr106_bender_gradient.png"
 #define TRANSPOSE_CHEVRON_FN "transpose_chevron.png"
 #define SWITCH_2WAY_HORIZ_FN "switch_2way_horizontal.png"
+#define SWITCH_3WAY_HORIZ_FN "switch_3way_horizontal.png"
