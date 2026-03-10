@@ -13,7 +13,7 @@ jobs:
           submodules: recursive
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
 
       - name: Build
         run: cmake --build build --config Release
@@ -72,11 +72,14 @@ jobs:
           cat > pkg/INSTALL.txt << 'EOF'
           Ultramaster KR-106 — macOS Installation
 
-          Copy plugins to the correct locations:
+          Copy each item to the correct location:
 
-             AU:         ~/Library/Audio/Plug-Ins/Components/
-             VST3:       ~/Library/Audio/Plug-Ins/VST3/
-             Standalone: Anywhere you like (e.g. /Applications)
+             KR106.component  →  ~/Library/Audio/Plug-Ins/Components/
+             KR106.vst3        →  ~/Library/Audio/Plug-Ins/VST3/
+             KR106.app         →  /Applications/ (or anywhere you like)
+
+          The .component file is the AU (Audio Unit) plugin for Logic Pro,
+          GarageBand, and other AU-compatible hosts.
 
           After copying, restart your DAW to scan for new plugins.
           EOF
@@ -95,7 +98,7 @@ jobs:
           submodules: recursive
 
       - name: Configure
-        run: cmake -B build
+        run: cmake -B build -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build
         run: cmake --build build --config Release

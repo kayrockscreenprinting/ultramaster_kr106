@@ -27,6 +27,10 @@ public:
         float strip = 0.f;  // 5px strip at top for transpose indicator
         float oy = 5.f;     // keys start here
 
+        // Fill entire white-key area first to avoid sub-pixel gaps on Windows
+        g.setColour(kKB_Light);
+        g.fillRect(ox, oy, 792.f, 109.f);
+
         for (int oct = 0; oct < 5; oct++)
         {
             int key = oct * 12;

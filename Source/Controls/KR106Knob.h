@@ -57,9 +57,20 @@ public:
                     idx * frameW2x, 0, frameW2x, h2x);            // src: 2x
     }
 
+    void mouseEnter(const juce::MouseEvent&) override
+    {
+        if (mTooltip && !mDragging) mTooltip->show(mParam, this);
+    }
+
+    void mouseExit(const juce::MouseEvent&) override
+    {
+        if (mTooltip && !mDragging) mTooltip->hide();
+    }
+
     void mouseDown(const juce::MouseEvent& e) override
     {
         if (e.mods.isPopupMenu()) return;
+        mDragging = true;
         mAccumVal = mParam ? mParam->getValue() : 0.f;
         mLastRawDelta = 0.f;
         if (mParam) mParam->beginChangeGesture();
@@ -81,9 +92,11 @@ public:
         mLastRawDelta = rawDelta;
 
         // Cumulative gearing: shift only affects new movement
-        float gearing = e.mods.isShiftDown() ? 1600.f : 160.f;
-        mAccumVal += increment / gearing;
-        float newVal = juce::jlimit(0.f, 1.f, mAccumVal);
+        // Scale by display DPI so non-retina screens get the same physical throw
+        float dpiScale = std::max(1.f, static_cast<float>(getTopLevelComponent()->getDesktopScaleFactor()));
+        float gearing = (e.mods.isShiftDown() ? 1270.f : 127.f) / dpiScale;
+        mAccumVal = juce::jlimit(0.f, 1.f, mAccumVal + increment / gearing);
+        float newVal = mAccumVal;
 
         mParam->setValueNotifyingHost(newVal);
         if (mTooltip) mTooltip->update();
@@ -101,10 +114,15 @@ public:
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        mDragging = false;
         if (mParam) mParam->endChangeGesture();
         if (mTooltip) mTooltip->hide();
         setMouseCursor(juce::MouseCursor::NormalCursor);
         e.source.enableUnboundedMouseMovement(false);
+
+        // Warp cursor to centre of knob so it appears on the control after release
+        auto screenPos = localPointToGlobal(juce::Point<int>(getWidth() / 2, getHeight() / 2));
+        juce::Desktop::getInstance().getMainMouseSource().setScreenPosition(screenPos.toFloat());
     }
 
 private:
@@ -115,4 +133,5 @@ private:
     juce::Image mBgImage;
     float mAccumVal = 0.f;
     float mLastRawDelta = 0.f;
+    bool mDragging = false;
 };

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(KR106 VERSION 1.0.0)
 
+set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
+
 add_subdirectory(libs/JUCE)
 
 # Platform-specific plugin formats
@@ -20,7 +22,8 @@ juce_add_plugin(KR106
     PLUGIN_MANUFACTURER_CODE Krok
     PLUGIN_CODE Kr16
     FORMATS ${KR106_FORMATS}
-    PRODUCT_NAME "KR106"
+    PRODUCT_NAME "KR-106"
+    PLUGIN_NAME "Ultramaster KR-106"
     LV2URI "https://kayrock.org/kr106"
     COPY_PLUGIN_AFTER_BUILD TRUE
 )

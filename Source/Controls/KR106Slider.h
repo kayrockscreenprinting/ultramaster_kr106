@@ -59,9 +59,20 @@ public:
     }
   }
 
+  void mouseEnter(const juce::MouseEvent&) override
+  {
+    if (mTooltip && !mDragging) mTooltip->show(mParam, this);
+  }
+
+  void mouseExit(const juce::MouseEvent&) override
+  {
+    if (mTooltip && !mDragging) mTooltip->hide();
+  }
+
   void mouseDown(const juce::MouseEvent& e) override
   {
     if (e.mods.isPopupMenu()) return;
+    mDragging = true;
     mAccumVal = mParam ? mParam->getValue() : 0.f;
     mLastRawDY = 0.f;
     if (mParam) mParam->beginChangeGesture();
@@ -78,9 +89,11 @@ public:
     mLastRawDY = dy;
 
     // Cumulative gearing: shift only affects new movement
-    float gearing = e.mods.isShiftDown() ? 980.f : 98.f;
-    mAccumVal += -increment / gearing;
-    float newVal = juce::jlimit(0.f, 1.f, mAccumVal);
+    // Scale by display DPI so non-retina screens get the same physical throw
+    float dpiScale = std::max(1.f, static_cast<float>(getTopLevelComponent()->getDesktopScaleFactor()));
+    float gearing = (e.mods.isShiftDown() ? 1270.f : 127.f) / dpiScale;
+    mAccumVal = juce::jlimit(0.f, 1.f, mAccumVal + -increment / gearing);
+    float newVal = mAccumVal;
     mParam->setValueNotifyingHost(newVal);
     if (mTooltip) mTooltip->update();
     repaint();
@@ -88,10 +101,17 @@ public:
 
   void mouseUp(const juce::MouseEvent& e) override
   {
+    mDragging = false;
     if (mParam) mParam->endChangeGesture();
     if (mTooltip) mTooltip->hide();
     setMouseCursor(juce::MouseCursor::NormalCursor);
     e.source.enableUnboundedMouseMovement(false);
+
+    // Warp cursor to the handle so it appears on the control after release
+    float val = mParam ? mParam->getValue() : 0.f;
+    float fy = std::round(44.f - val * 40.f);
+    auto screenPos = localPointToGlobal(juce::Point<int>(6, static_cast<int>(fy)));
+    juce::Desktop::getInstance().getMainMouseSource().setScreenPosition(screenPos.toFloat());
   }
 
 private:
@@ -108,4 +128,5 @@ private:
   juce::Image mHandleImg;
   float mAccumVal = 0.f;
   float mLastRawDY = 0.f;
+  bool mDragging = false;
 };
