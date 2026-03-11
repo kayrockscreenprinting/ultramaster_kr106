@@ -76,11 +76,14 @@ KR106AudioProcessor::KR106AudioProcessor()
     if (t >= 1000.0) return juce::String(t / 1000.0, 2) + " s";
     return juce::String(juce::roundToInt(t)) + " ms";
   };
-  auto fmtMs = [this](const float* lut106, const float* lut6) -> SFV {
-    return [this, lut106, lut6](float v, int) {
-      const float* lut = (mParams[kAdsrMode] && mParams[kAdsrMode]->getValue() > 0.5f)
-                           ? lut106 : lut6;
-      float ms = KR106DSP<float>::LookupLUT(lut, v);
+  // Juno-6 slider→tau formulas (must match KR106_DSP_SetParam.h)
+  auto j6AttackMs = [](float s) { return 0.001f * std::pow(3000.f, s) * 1000.f; };
+  auto j6DecayMs  = [](float s) { return 0.004f * std::pow(1000.f, s) * 1000.f; };
+
+  auto fmtMs = [this](const float* lut106, std::function<float(float)> j6Fn) -> SFV {
+    return [this, lut106, j6Fn](float v, int) {
+      bool j6 = mParams[kAdsrMode] && mParams[kAdsrMode]->getValue() < 0.5f;
+      float ms = j6 ? j6Fn(v) : KR106DSP<float>::LookupLUT(lut106, v);
       if (ms >= 1000.f) return juce::String(ms / 1000.f, 2) + " s";
       return juce::String(juce::roundToInt(ms)) + " ms";
     };
@@ -131,12 +134,12 @@ KR106AudioProcessor::KR106AudioProcessor()
 
   // ADSR (raw 0-1 slider values; DSP applies curve + range via LUT)
   addSlider(kEnvA,       "Attack",      0.25f, 0.f, 1.f,
-            fmtMs(KR106DSP<float>::kAttackLUT, KR106DSP<float>::kAttackLUT_J6));
+            fmtMs(KR106DSP<float>::kAttackLUT, j6AttackMs));
   addSlider(kEnvD,       "Decay",       0.25f, 0.f, 1.f,
-            fmtMs(KR106DSP<float>::kDecayLUT, KR106DSP<float>::kDecayLUT_J6));
+            fmtMs(KR106DSP<float>::kDecayLUT, j6DecayMs));
   addSlider(kEnvS,       "Sustain",     0.9f,  0.f, 1.f, fmtPct);
   addSlider(kEnvR,       "Release",     0.25f, 0.f, 1.f,
-            fmtMs(KR106DSP<float>::kReleaseLUT, KR106DSP<float>::kReleaseLUT_J6));
+            fmtMs(KR106DSP<float>::kReleaseLUT, j6DecayMs));
 
   // Toggle buttons
   addBool(kTranspose,    "Transpose",   false);
@@ -319,6 +322,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     for (int i = 0; i < nFrames; i++)
     {
       mScopeRing[wp] = outputs[0][i];
+      mScopeRingR[wp] = nOutputs > 1 ? outputs[1][i] : outputs[0][i];
       mScopeSyncRing[wp] = syncBuf[i];
       wp = (wp + 1) % kScopeRingSize;
     }

@@ -62,7 +62,8 @@ public:
 
   // Scope ring buffer (audio writes, UI reads via timer)
   static constexpr int kScopeRingSize = 4096;
-  float mScopeRing[kScopeRingSize] = {};
+  float mScopeRing[kScopeRingSize] = {};    // L channel
+  float mScopeRingR[kScopeRingSize] = {};   // R channel
   float mScopeSyncRing[kScopeRingSize] = {};
   std::atomic<int> mScopeWritePos{0};
 

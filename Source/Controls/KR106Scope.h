@@ -78,6 +78,7 @@ public:
             if (absS > peak) peak = absS;
 
             mRing[mRingWritePos]     = s;
+            mRingR[mRingWritePos]    = mProcessor->mScopeRingR[srcIdx];
             mSyncRing[mRingWritePos] = mProcessor->mScopeSyncRing[srcIdx];
             mRingWritePos = (mRingWritePos + 1) % RING_SIZE;
         }
@@ -119,7 +120,11 @@ public:
                 mDisplayLen = period;
                 int startIdx = (mRingWritePos - startDist + RING_SIZE) % RING_SIZE;
                 for (int i = 0; i < period; i++)
-                    mDisplay[i] = mRing[(startIdx + i) % RING_SIZE];
+                {
+                    int idx = (startIdx + i) % RING_SIZE;
+                    mDisplay[i]  = mRing[idx];
+                    mDisplayR[i] = mRingR[idx];
+                }
                 mHasData = true;
             }
         }
@@ -155,6 +160,27 @@ private:
         // Waveform -- one full period interpolated to fill the display width
         if (mHasData && mDisplayLen > 1)
         {
+            // R channel (dimmer, drawn first so L overlays it)
+            g.setColour(dim);
+            int lastYR = static_cast<int>((mDisplayR[0] / scale) * -v2 + v2);
+            for (int i = 0; i < w; i++)
+            {
+                float pos = static_cast<float>(i) / static_cast<float>(w) * mDisplayLen;
+                int s0 = static_cast<int>(pos);
+                float frac = pos - s0;
+                if (s0 >= mDisplayLen - 1) { s0 = mDisplayLen - 2; frac = 1.f; }
+
+                float sample = mDisplayR[s0] + frac * (mDisplayR[s0 + 1] - mDisplayR[s0]);
+                int y = static_cast<int>((sample / scale) * -v2 + v2);
+
+                int y1 = std::min(lastYR, y);
+                int y2 = std::max(lastYR, y) + 1;
+                g.fillRect(static_cast<float>(i), static_cast<float>(y1),
+                           1.f, static_cast<float>(y2 - y1));
+                lastYR = y;
+            }
+
+            // L channel (bright, on top)
             g.setColour(bright);
             int lastY = static_cast<int>((mDisplay[0] / scale) * -v2 + v2);
             for (int i = 0; i < w; i++)
@@ -187,10 +213,18 @@ private:
 
         // Read current ADSR parameters
         bool j6 = (dsp.mAdsrMode == 0);
-        float attackMs  = DSP::LookupLUT(j6 ? DSP::kAttackLUT_J6  : DSP::kAttackLUT,  dsp.mSliderA);
-        float decayMs   = DSP::LookupLUT(j6 ? DSP::kDecayLUT_J6   : DSP::kDecayLUT,   dsp.mSliderD);
+        float attackMs, decayMs, releaseMs;
+        if (j6) {
+            // Juno-6: exponential slider→tau formulas (must match KR106_DSP_SetParam.h)
+            attackMs  = 0.001f * std::pow(3000.f, dsp.mSliderA) * 1000.f;
+            decayMs   = 0.004f * std::pow(1000.f, dsp.mSliderD) * 1000.f;
+            releaseMs = 0.004f * std::pow(1000.f, dsp.mSliderR) * 1000.f;
+        } else {
+            attackMs  = DSP::LookupLUT(DSP::kAttackLUT,  dsp.mSliderA);
+            decayMs   = DSP::LookupLUT(DSP::kDecayLUT,   dsp.mSliderD);
+            releaseMs = DSP::LookupLUT(DSP::kReleaseLUT, dsp.mSliderR);
+        }
         float sustain   = std::max(mProcessor->getParam(kEnvS)->getValue(), 0.001f);
-        float releaseMs = DSP::LookupLUT(j6 ? DSP::kReleaseLUT_J6 : DSP::kReleaseLUT, dsp.mSliderR);
 
         // Sustain display length: proportional to max(D, R), clamped
         float sustainMs = std::clamp(0.5f * std::max(decayMs, releaseMs), 50.f, 2000.f);
@@ -297,6 +331,7 @@ private:
 
     // Local ring buffers (copied from processor)
     float mRing[RING_SIZE] = {};
+    float mRingR[RING_SIZE] = {};
     float mSyncRing[RING_SIZE] = {};
     int mRingWritePos = 0;
     int mLocalReadPos = 0;
@@ -304,6 +339,7 @@ private:
 
     // Display buffer (one extracted period)
     float mDisplay[RING_SIZE] = {};
+    float mDisplayR[RING_SIZE] = {};
     int mDisplayLen = 0;
     bool mHasData = false;
 };
