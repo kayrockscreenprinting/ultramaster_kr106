@@ -20,8 +20,44 @@ struct Arpeggiator
   bool mEnabled = false;
   int mMode = 0;       // 0=Up, 1=Up/Down, 2=Down
   int mRange = 0;      // 0=1oct, 1=2oct, 2=3oct
-  float mRate = 120.f; // steps per minute
+  float mRate = 120.f; // steps per minute (mapped from slider)
   float mSampleRate = 44100.f;
+
+  /*
+  * arp_rate_hz — Juno-106 Arpeggio Rate oscillator frequency
+  *
+  * The VR1 section is a Schmitt-trigger relaxation oscillator: capacitor C4
+  * charges and discharges through the total timing resistance Rt = R21 + VR1,
+  * switching between two thresholds set by the R16/R17 positive-feedback
+  * divider on the op-amp's non-inverting input.
+  *
+  * The threshold fraction is α = R16/(R16+R17) = 47K/147K ≈ 0.3197, so on
+  * a ±15V supply the cap swings between −4.796V and +4.796V each half-cycle.
+  *
+  * Solving the RC charging equation for the half-period:
+  *   t_half = Rt · C4 · ln((1+α)/(1−α))
+  *          = Rt · C4 · ln(1.3197/0.6803)
+  *          ≈ Rt · C4 · 0.6633
+  *
+  * Full period T = 2 · t_half, so:
+  *   f = 1 / (2 · Rt · C4 · 0.6633)
+  *     = 1 / (2 · (R21 + pos·VR1_MAX) · C4 · 0.6633)
+  *
+  * pos=0 → Rt=33K  → f ≈ 48.5 Hz  (fastest arp rate)
+  * pos=1 → Rt=1.033M → f ≈  1.55 Hz  (slowest arp rate)
+  *
+  * Note: response is hyperbolic (f ∝ 1/pos), not linear — the pot
+  * is linear taper but the perceived curve is naturally logarithmic.
+  */
+  static float arpRate(float t) {
+    // Our original 2001 linear fader code    return 15.f + t * 1785.f;
+
+    // Schmitt-trigger relaxation oscillator: f in Hz, convert to BPM
+    // Invert slider: 0=slowest (max resistance), 1=fastest (min resistance)
+    float pos = 1.f - t;
+    float hz = 1.0f / (2.0f * (33000.0f + pos * 1000000.0f) * 0.47e-6f * 0.6633f);
+    return hz * 60.f;
+  }
 
   std::vector<int> mHeldNotes; // sorted ascending
 
