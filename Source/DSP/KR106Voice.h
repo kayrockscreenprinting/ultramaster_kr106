@@ -131,7 +131,7 @@ public:
     static constexpr float kMaxSemitones = 36.0f; // ±36 st = ~6 oct peak-to-peak
     static constexpr float kExponent     = 1.20f; // power law taper, measured
 
-    return std::powf(t, kExponent) * kMaxSemitones;
+    return std::pow(t, kExponent) * kMaxSemitones;
   }
 
   // vcfLfoDepth106()
