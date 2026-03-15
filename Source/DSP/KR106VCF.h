@@ -93,8 +93,8 @@ struct Downsampler2x
 struct VCF
 {
   float mS[4] = {}; // integrator states
-  bool mBypassLoopClamp = false; // set true to disable high-freq resonance limiter
-  bool mNonlinearStages = true; // set true for per-stage OTA tanh (IR3109 model)
+  bool mLoopClamp = true;       // high-freq resonance limiter (OTA bandwidth rolloff)
+  bool mOTASaturation = true;   // per-stage OTA tanh nonlinearity (IR3109 model)
   uint32_t mNoiseSeed = 123456789u; // thermal noise PRNG state
 
   // 2x oversampling: polyphase filters for anti-imaging/aliasing
@@ -192,8 +192,17 @@ private:
     float noiseLevel = 1e-3f / (1.f + stateEnergy * 1000.f);
     input += white * noiseLevel;
 
-    // Feedback amount (k=0 no resonance, k=4 self-oscillation threshold)
-    float k = res * 4.f;
+    // Exponential resonance CV: TR1 (2SA1015-GR PNP) exponential
+    // converter feeds BA662 OTA control on both Juno-6 and Juno-106.
+    // Measured Juno-6 peak heights fit a single exponential model:
+    // feedback_gain = 0.971 * exp(0.033 * x); steepness c=3.5.
+    // k = 0.179 * (exp(3.5*res) - 1): self-oscillation onset at res ≈ 0.9.
+    // FIXME: calibrated from Juno-6 measurements. NOT YET MEASURED on a
+    // real 106. Same topology (ext transistor -> linear BA662) but different
+    // resistor scaling (20K trim + 27K vs Juno-6's 15K/1.5K/1.5K). Expect
+    // same exponential shape with different a/b coefficients. Needs
+    // equivalent hardware measurement from a 106 to fit.
+    float k = 0.179f * (expf(3.5f * res) - 1.f);
 
     // Precompute gains for the 4-pole cascade solution
     float g1 = g / (1.f + g);  // one-pole gain
@@ -208,7 +217,7 @@ private:
     // self-oscillation character. Above 0.3, progressively reduce the
     // loop gain to prevent the resonance limit cycle from producing
     // audible aliased harmonics near Nyquist.
-    if (!mBypassLoopClamp)
+    if (mLoopClamp)
     {
       float maxLoop = 1.2f - std::max(frq - 0.3f, 0.f);
       maxLoop = std::max(maxLoop, 0.4f);
@@ -229,18 +238,21 @@ private:
     float u = (input * comp - k * OTASat(S)) / (1.f + k * G);
 
     float lp4;
-    if (mNonlinearStages)
+    if (mOTASaturation)
     {
-      // Per-stage OTA tanh nonlinearity: models the IR3109 differential
-      // pair in each stage. tanh(Vin - Vout) acts as a slew-rate limiter,
-      // causing signal-dependent cutoff shift and subtle harmonic generation.
-      // Each stage solves y = s + g*tanh(x - y) via one Newton-Raphson
-      // iteration from the linear estimate, avoiding the artifacts that
-      // the explicit form produces at high cutoff + resonance.
-      float lp1 = NLStage(mS[0], u,   g, g1);
-      float lp2 = NLStage(mS[1], lp1, g, g1);
-      float lp3 = NLStage(mS[2], lp2, g, g1);
-      lp4       = NLStage(mS[3], lp3, g, g1);
+      // Pre-compensate g for per-stage OTA gain compression: the
+      // tanh in NLStage reduces effective integrator gain at self-
+      // oscillation amplitude, pulling oscillation frequency below
+      // the target cutoff. Boost g for the stages only — the feedback
+      // equation (G, S, u) uses the un-boosted g so the resonance
+      // onset threshold is unaffected.
+      float gNL  = g * (1.f + res * res * g * 0.9f);
+      float g1NL = gNL / (1.f + gNL);
+
+      float lp1 = NLStage(mS[0], u,   gNL, g1NL);
+      float lp2 = NLStage(mS[1], lp1, gNL, g1NL);
+      float lp3 = NLStage(mS[2], lp2, gNL, g1NL);
+      lp4       = NLStage(mS[3], lp3, gNL, g1NL);
     }
     else
     {

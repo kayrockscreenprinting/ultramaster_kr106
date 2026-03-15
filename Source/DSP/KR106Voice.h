@@ -103,7 +103,7 @@ public:
       return static_cast<float>(seed) / static_cast<float>(0xFFFFFFFF) * 2.f - 1.f;
     };
 
-    mVcfFreqOffset   = rng() * 0.05f;        // ±5% filter cutoff
+    mVcfFreqOffset   = 0.f; // rng() * 0.05f;        // ±5% filter cutoff — disabled for testing
     mPitchOffset     = rng() * 3.f / 1200.f; // ±3 cents (in octaves)
     mADSR.mTimeScale = 1.f + rng() * 0.08f;  // ±8% envelope timing
     mVcaGainScale    = 1.f + rng() * 0.06f;  // ±0.5 dB VCA gain

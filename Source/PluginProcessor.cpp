@@ -15,7 +15,7 @@ KR106AudioProcessor::KR106AudioProcessor()
     if (fmt) attrs = attrs.withStringFromValueFunction(std::move(fmt));
     auto* p = new juce::AudioParameterFloat(
       juce::ParameterID("p" + juce::String(idx), 1), name,
-      juce::NormalisableRange<float>(min, max, 1.f / 512.f), def, attrs);
+      juce::NormalisableRange<float>(min, max), def, attrs);
     addParameter(p);
     mParams[idx] = p;
   };

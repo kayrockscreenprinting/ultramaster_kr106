@@ -128,6 +128,7 @@ public:
     if (!parent) return;
 
     mEditor = std::make_unique<juce::TextEditor>();
+    mEditor->setLookAndFeel(&getEditBoxLnF());
     mEditor->setFont(juce::FontOptions(11.f));
     mEditor->setColour(juce::TextEditor::backgroundColourId, juce::Colour(0, 0, 0));
     mEditor->setColour(juce::TextEditor::textColourId, juce::Colour(255, 255, 255));
@@ -135,15 +136,16 @@ public:
     mEditor->setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(128, 128, 128));
     mEditor->setColour(juce::TextEditor::highlightColourId, juce::Colour(80, 80, 80));
     mEditor->setJustification(juce::Justification::centred);
-    mEditor->setSelectAllWhenFocused(true);
 
-    // Pre-fill with panel value (0–10 scale)
-    float panelVal = mParam->getValue() * 10.f;
-    mEditor->setText(juce::String(panelVal, 2));
+    // Pre-fill with formatted value (includes units)
+    juce::String displayText = mParam->getCurrentValueAsText();
+    mEditor->setText(displayText, false);
 
-    // Position below slider, matching tooltip placement
+    // Position below slider, sized to fit text (like tooltip)
     auto srcBounds = parent->getLocalArea(getParentComponent(), getBounds());
-    int tw = 50, th = 16;
+    juce::Font font{juce::FontOptions(11.f)};
+    int tw = std::max(50, juce::roundToInt(font.getStringWidthFloat(displayText)) + 16);
+    int th = 16;
     int tx = srcBounds.getCentreX() - tw / 2;
     int ty = srcBounds.getBottom() + 2;
     auto pb = parent->getLocalBounds();
@@ -154,6 +156,10 @@ public:
     parent->addAndMakeVisible(mEditor.get());
     mEditor->grabKeyboardFocus();
 
+    // Select only the numeric portion (not the unit suffix)
+    int numEnd = findNumericEnd(displayText);
+    mEditor->setHighlightedRegion(juce::Range<int>(0, numEnd));
+
     mEditor->onReturnKey = [this]() { commitEdit(); };
     mEditor->onEscapeKey = [this]() { dismissEdit(); };
     mEditor->onFocusLost = [this]() { dismissEdit(); };
@@ -163,8 +169,29 @@ private:
   void commitEdit()
   {
     if (!mEditor || !mParam) return;
-    float typed = mEditor->getText().getFloatValue();
-    float normalized = juce::jlimit(0.f, 1.f, typed / 10.f);
+    juce::String raw = mEditor->getText().trim();
+    if (raw.isEmpty()) { dismissEdit(); return; }
+
+    float typedNum = extractLeadingNumber(raw);
+    juce::String typedUnit = extractUnit(raw);
+
+    // Normalize to base units: kHz→Hz, s→ms, s/oct→ms/oct
+    if (typedUnit == "khz") typedNum *= 1000.f;
+    else if (typedUnit == "s/oct") typedNum *= 1000.f;
+    else if (typedUnit == "s") typedNum *= 1000.f;
+
+    // Binary search the 0–1 normalized range for the matching display value
+    float lo = 0.f, hi = 1.f;
+    bool inverted = getDisplayValueInBaseUnits(0.f) > getDisplayValueInBaseUnits(1.f);
+    for (int iter = 0; iter < 50; iter++)
+    {
+      float mid = (lo + hi) * 0.5f;
+      float midVal = getDisplayValueInBaseUnits(mid);
+      bool goHigh = inverted ? (midVal > typedNum) : (midVal < typedNum);
+      if (goHigh) lo = mid; else hi = mid;
+    }
+
+    float normalized = juce::jlimit(0.f, 1.f, (lo + hi) * 0.5f);
     mParam->beginChangeGesture();
     mParam->setValueNotifyingHost(normalized);
     mParam->endChangeGesture();
@@ -176,9 +203,68 @@ private:
   {
     if (!mEditor) return;
     auto editor = std::move(mEditor);
+    editor->setLookAndFeel(nullptr);
     editor->onFocusLost = nullptr;
     if (auto* parent = editor->getParentComponent())
       parent->removeChildComponent(editor.get());
+  }
+
+  // --- Edit-box LookAndFeel: 1px sharp border matching tooltip ---
+  struct EditBoxLnF : juce::LookAndFeel_V4
+  {
+    void drawTextEditorOutline(juce::Graphics& g, int w, int h, juce::TextEditor&) override
+    {
+      g.setColour(juce::Colour(128, 128, 128));
+      g.drawRect(0, 0, w, h, 1);
+    }
+  };
+  static EditBoxLnF& getEditBoxLnF() { static EditBoxLnF lnf; return lnf; }
+
+  // Find where the numeric portion ends (for text selection)
+  static int findNumericEnd(const juce::String& text)
+  {
+    int i = 0, len = text.length();
+    if (i < len && (text[i] == '+' || text[i] == '-')) i++;
+    bool hasDigit = false;
+    while (i < len && (juce::CharacterFunctions::isDigit(text[i]) || text[i] == '.'))
+    { if (text[i] != '.') hasDigit = true; i++; }
+    return hasDigit ? i : len;
+  }
+
+  // Extract leading number from formatted text (e.g. "+5.0 Hz" → 5.0)
+  static float extractLeadingNumber(const juce::String& text)
+  {
+    int i = 0, len = text.length();
+    while (i < len && text[i] == ' ') i++;
+    int start = i;
+    if (i < len && (text[i] == '+' || text[i] == '-')) i++;
+    bool hasDigit = false;
+    while (i < len && (juce::CharacterFunctions::isDigit(text[i]) || text[i] == '.'))
+    { if (text[i] != '.') hasDigit = true; i++; }
+    return hasDigit ? text.substring(start, i).getFloatValue() : 0.f;
+  }
+
+  // Extract unit suffix from text (e.g. "5.0 Hz" → "hz"), case-insensitive
+  static juce::String extractUnit(const juce::String& text)
+  {
+    int i = 0, len = text.length();
+    while (i < len && text[i] == ' ') i++;
+    if (i < len && (text[i] == '+' || text[i] == '-')) i++;
+    while (i < len && (juce::CharacterFunctions::isDigit(text[i]) || text[i] == '.')) i++;
+    return text.substring(i).trim().toLowerCase();
+  }
+
+  // Get display value in base units (Hz not kHz, ms not s) at a normalized position
+  float getDisplayValueInBaseUnits(float normalized) const
+  {
+    juce::String text = mParam->getText(normalized, 100);
+    if (text.containsIgnoreCase("inf")) return -1000.f;
+    float num = extractLeadingNumber(text);
+    juce::String unit = extractUnit(text);
+    if (unit == "khz") return num * 1000.f;
+    if (unit == "s/oct") return num * 1000.f;
+    if (unit == "s") return num * 1000.f;
+    return num;
   }
 
   int getNumSteps() const
