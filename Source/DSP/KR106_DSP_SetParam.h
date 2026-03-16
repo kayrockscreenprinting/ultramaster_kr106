@@ -192,7 +192,11 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     case kAdsrMode: {
       mAdsrMode = static_cast<int>(value);
       bool j6 = (mAdsrMode == 0);
-      ForEachVoice([j6](kr106::Voice<T>& v) { v.mADSR.mJ6Mode = j6; });
+      ForEachVoice([j6](kr106::Voice<T>& v) {
+        v.mADSR.mJ6Mode = j6;
+        v.mVCF.mJ106Res = !j6;
+        v.mOsc.mPulseInvert = !j6;
+      });
       mLFO.mJ6Mode = j6;
       SetParam(kEnvA, mSliderA);
       SetParam(kEnvD, mSliderD);

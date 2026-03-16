@@ -247,7 +247,7 @@ inline uint16_t calc_vcf_bend_amt(
  */
 inline float dacToHz(uint16_t dac)
 {
-  static constexpr float kBaseFreq = 5.f;
+  static constexpr float kBaseFreq = 5.53f;
   static constexpr float kScale = 0.693147f / 1143.f;
   return kBaseFreq * expf(static_cast<float>(dac) * kScale);
 }

@@ -229,9 +229,15 @@ struct ADSR
     mState = kAttack;
     if (!mJ6Mode)
     {
-      // Sync interpolation state to current integer value (for smooth retrigger)
-      float cur = static_cast<float>(mEnvInt) / kEnvMax;
-      mEnvPrev = mEnvNext = cur;
+      // Save current level as interpolation starting point (for smooth retrigger)
+      mEnvPrev = static_cast<float>(mEnvInt) / kEnvMax;
+      // Apply first attack tick immediately — matches firmware behavior where
+      // NoteOn and envelope update happen in the same 4.2ms loop iteration.
+      // Without this, the envelope sits at zero for up to one full tick period.
+      // Don't reset mTickAccum — keep in phase with the VCF tick accumulator
+      // so both sample the same tick boundaries (as in the real D7811G main loop).
+      Tick106();
+      mEnvNext = static_cast<float>(mEnvInt) / kEnvMax;
     }
   }
 

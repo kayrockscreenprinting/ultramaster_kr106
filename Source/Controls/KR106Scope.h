@@ -41,13 +41,15 @@ public:
 
         if (mScaleIdx < 3)
             paintWaveform(g, w, h, black, dim, mid, bright);
-        else
+        else if (mScaleIdx == 3)
             paintADSR(g, w, h, dim, mid, bright);
+        else
+            paintVCF(g, w, h, dim, mid, bright);
     }
 
     void mouseDown(const juce::MouseEvent&) override
     {
-        mScaleIdx = (mScaleIdx + 1) % 4; // 0-2: waveform scales, 3: ADSR
+        mScaleIdx = (mScaleIdx + 1) % 5; // 0-2: waveform scales, 3: ADSR, 4: VCF
         repaint();
     }
 
@@ -64,8 +66,8 @@ public:
                          % KR106AudioProcessor::kScopeRingSize;
         if (newSamples == 0)
         {
-            // ADSR mode reads slider params directly — repaint even with no audio
-            if (mScaleIdx == 3) repaint();
+            // ADSR/VCF modes read slider params directly — repaint even with no audio
+            if (mScaleIdx >= 3) repaint();
             return;
         }
 
@@ -412,6 +414,103 @@ private:
                            1.f, static_cast<float>(y2 - y1));
                 lastY = y;
             }
+        }
+    }
+
+    // ---- VCF frequency response display ----
+    // Analytically evaluates the 4-pole cascade + feedback transfer function:
+    //   |H(f)|² = 1 / ((1+x²)⁴ + 2k·(1+x²)²·cos(4·atan(x)) + k²)
+    // where x = f/fc, fc = individual pole frequency (= self-oscillation freq).
+    void paintVCF(juce::Graphics& g, int w, int h,
+                  juce::Colour dim, juce::Colour mid, juce::Colour bright)
+    {
+        if (!mProcessor) return;
+
+        auto& dsp = mProcessor->mDSP;
+        bool j106 = (dsp.mAdsrMode != 0);
+
+        // Compute cutoff frequency (Hz) from slider — same logic as SetParam
+        float slider = dsp.mSliderVcfFreq;
+        float fc;
+        if (j106)
+        {
+            uint16_t cutoffInt = static_cast<uint16_t>(slider * 0x3F80);
+            fc = kr106::dacToHz(cutoffInt);
+        }
+        else
+            fc = kr106::j6_vcf_freq_from_slider(slider);
+
+        // Compute resonance k — uses same static functions as VCF::ProcessSample
+        float res = mProcessor->getParam(kVcfRes)->getValue();
+        float k = j106 ? kr106::VCF::ResK_J106(res) : kr106::VCF::ResK_J6(res);
+
+        float fcSlider = fc; // slider frequency for the marker
+
+        // Apply the same pole-frequency compensation as the DSP
+        if (j106)
+            fc *= kr106::VCF::FreqCompensation(k);
+
+        // Display range
+        static constexpr float kMinHz = 20.f;
+        static constexpr float kMaxHz = 20000.f;
+        static constexpr float kMinDb = -48.f;
+        static constexpr float kMaxDb = 24.f;
+        static constexpr float kDbRange = kMaxDb - kMinDb; // 72 dB
+        float logMin = log10f(kMinHz);
+        float logMax = log10f(kMaxHz);
+        float logRange = logMax - logMin;
+
+        // Grid: vertical lines at decade frequencies
+        g.setColour(dim);
+        for (float freq : { 100.f, 1000.f, 10000.f })
+        {
+            float xf = (log10f(freq) - logMin) / logRange * (w - 1);
+            g.fillRect(xf, 0.f, 1.f, static_cast<float>(h));
+        }
+
+        // Grid: horizontal lines every 12 dB
+        for (float db = kMinDb + 12.f; db < kMaxDb; db += 12.f)
+        {
+            float yf = (1.f - (db - kMinDb) / kDbRange) * (h - 1);
+            g.setColour(db == 0.f ? mid : dim);
+            g.fillRect(0.f, std::round(yf), static_cast<float>(w), 1.f);
+        }
+
+        // Cutoff frequency marker (fixed at slider position)
+        if (fcSlider >= kMinHz && fcSlider <= kMaxHz)
+        {
+            g.setColour(mid);
+            float xfc = (log10f(fcSlider) - logMin) / logRange * (w - 1);
+            g.fillRect(std::round(xfc), 0.f, 1.f, static_cast<float>(h));
+        }
+
+        // Evaluate and draw magnitude response (normalized to 0 dB at DC)
+        float k2 = k * k;
+        float dcGainInv = (1.f + k) * (1.f + k); // compensate feedback passband loss
+        g.setColour(bright);
+        int lastY = h / 2;
+        for (int px = 0; px < w; px++)
+        {
+            float logF = logMin + static_cast<float>(px) / (w - 1) * logRange;
+            float freq = powf(10.f, logF);
+            float x = freq / fc;
+            float x2 = x * x;
+            float p2 = 1.f + x2;        // (1 + x²)
+            float p4 = p2 * p2;          // (1 + x²)²
+            float p8 = p4 * p4;          // (1 + x²)⁴
+            float theta4 = 4.f * atanf(x);
+            float denomSq = p8 + 2.f * k * p4 * cosf(theta4) + k2;
+            float magSq = dcGainInv / denomSq;
+            float db = 10.f * log10f(std::max(magSq, 1e-12f));
+            db = std::clamp(db, kMinDb, kMaxDb);
+
+            int y = static_cast<int>(std::round((1.f - (db - kMinDb) / kDbRange) * (h - 1)));
+
+            int y1 = std::min(lastY, y);
+            int y2 = std::max(lastY, y) + 1;
+            g.fillRect(static_cast<float>(px), static_cast<float>(y1),
+                       1.f, static_cast<float>(y2 - y1));
+            lastY = y;
         }
     }
 

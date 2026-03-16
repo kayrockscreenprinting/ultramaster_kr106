@@ -94,7 +94,8 @@ struct VCF
 {
   float mS[4] = {}; // integrator states
   bool mLoopClamp = true;       // high-freq resonance limiter (OTA bandwidth rolloff)
-  bool mOTASaturation = true;   // per-stage OTA tanh nonlinearity (IR3109 model)
+  bool mOTASaturation = false;   // per-stage OTA tanh nonlinearity (IR3109 model), marginal audio quality at the expense of lots of pitch tracking error
+  bool mJ106Res = false;         // true = J106 resonance curve, false = J6 (calibrated)
   uint32_t mNoiseSeed = 123456789u; // thermal noise PRNG state
 
   // 2x oversampling: polyphase filters for anti-imaging/aliasing
@@ -141,6 +142,53 @@ struct VCF
     return 27.f * (27.f - 3.f * x2) / (d * d);
   }
 
+  // Resonance slider → feedback gain k.
+  // Juno-6 (calibrated from hardware, March 2026):
+  //   Saw C1 (32.7 Hz) through VCF, LFO sweep across full cutoff range,
+  //   recorded at R=0/3/5/7 via direct line out at 88.2 kHz.
+  //   Filter response extracted by dividing out 1/n saw spectrum at each
+  //   harmonic, then matching transition-region slope (+1 oct past -6dB)
+  //   against the 4-pole TPT cascade simulation (2x oversampled).
+  //
+  //   R=3 (res=0.3): k ≈ 0.91, measured slope ≈ -18.9 dB/oct
+  //   R=5 (res=0.5): k ≈ 1.94, measured slope ≈ -22.7 dB/oct
+  //   R=7 (res=0.7): k ≈ 3.52, measured slope ≈ -26.8 dB/oct
+  //   R=0 slope (-13.1 dB/oct) matches sim with k=0 (no fit needed).
+  //
+  static float ResK_J6(float res)
+  {
+    return 1.024f * (expf(2.128f * res) - 1.f);
+  }
+
+  // Juno-106 (modeled from J106 schematic):
+  //   2SA1015-GR PNP emitter follower, 27K fixed + 20K trim (VR4).
+  //   Slider voltage (0–10V) minus Vbe (0.6V), linear ic above threshold.
+  //   k_scale sets BA662→IR3109 feedback gain; 4-pole cascade self-
+  //   oscillates at k=4.0 (each stage contributes 45° at ω=ωc, total
+  //   cascade gain = (1/√2)⁴ = 1/4, so loop gain = k/4 = 1).
+  static float ResK_J106(float res)
+  {
+    static constexpr float kJ106KScale = 0.5434f; // 7.0 * 27000 / (9.4 * 37000)
+    float v = std::max(res * 10.f - 0.6f, 0.f);
+    return kJ106KScale * v;
+  }
+
+  // Frequency compensation for 4-pole cascade with global feedback k.
+  // A cascade of 4 identical poles has its -3dB point well below the
+  // individual pole frequency at low k (0.51× at k=0) and above it at
+  // high k (1.46× at k≈3.2). The real IR3109 appears to compensate
+  // internally — hardware measurements show the perceived cutoff
+  // tracking the slider much more closely than the raw math predicts.
+  // This rational approximation maps k → pole-frequency multiplier so
+  // the effective -3dB point stays on target. Max error 1.4% over k∈[0,4.5].
+  static float FreqCompensation(float k)
+  {
+    // Only boost — never push poles below the slider frequency, or the
+    // resonance peak drifts down. Above k≈0.87 the raw curve drops
+    // below 1.0; clamp there so the peak stays at the set frequency.
+    return std::max((1.96f + 1.06f * k) / (1.f + 2.16f * k), 1.f);
+  }
+
   // Nonlinear one-pole OTA-C stage: solves y = s + g*tanh(x - y)
   // via one Newton-Raphson iteration from the linear TPT estimate.
   static float NLStage(float& s, float x, float g, float g1)
@@ -178,6 +226,15 @@ private:
   // Internal per-sample filter at the oversampled rate
   float ProcessSample(float input, float frq, float res)
   {
+    // Resonance CV: external transistor feeds BA662 OTA control current.
+    float k = mJ106Res ? ResK_J106(res) : ResK_J6(res);
+
+    // Compensate pole frequency so the effective -3dB point tracks the
+    // intended cutoff regardless of resonance (models IR3109 internal
+    // compensation absent from the ideal TPT cascade).
+    if (mJ106Res)
+      frq *= FreqCompensation(k);
+
     // Warp cutoff to continuous-time frequency, then to integrator coeff
     float g = tanf(std::min(frq, 0.85f) * static_cast<float>(M_PI) * 0.5f);
 
@@ -191,26 +248,6 @@ private:
     float stateEnergy = fabsf(mS[0]) + fabsf(mS[1]) + fabsf(mS[2]) + fabsf(mS[3]);
     float noiseLevel = 1e-3f / (1.f + stateEnergy * 1000.f);
     input += white * noiseLevel;
-
-    // Resonance CV: exponential converter (TR1, 2SA1015-GR PNP) feeds
-    // BA662 OTA control. Feedback gain follows k = a*(exp(b*res) - 1).
-    //
-    // Calibrated from Juno-6 hardware, March 2026:
-    //   Saw C1 (32.7 Hz) through VCF, LFO sweep across full cutoff range,
-    //   recorded at R=0/3/5/7 via direct line out at 88.2 kHz.
-    //   Filter response extracted by dividing out 1/n saw spectrum at each
-    //   harmonic, then matching transition-region slope (+1 oct past -6dB)
-    //   against the 4-pole TPT cascade simulation (2x oversampled).
-    //
-    //   R=3 (res=0.3): k ≈ 0.91, measured slope ≈ -18.9 dB/oct
-    //   R=5 (res=0.5): k ≈ 1.94, measured slope ≈ -22.7 dB/oct
-    //   R=7 (res=0.7): k ≈ 3.52, measured slope ≈ -26.8 dB/oct
-    //   R=0 slope (-13.1 dB/oct) matches sim with k=0 (no fit needed).
-    //
-    // FIXME Juno-106 NOT YET MEASURED. Same topology (ext transistor → BA662)
-    // but different resistor scaling (20K trim + 27K vs 6's 15K/1.5K/1.5K).
-    // Expect same exponential shape with different a/b coefficients.
-    float k = 1.024f * (expf(2.128f * res) - 1.f);
 
     // Precompute gains for the 4-pole cascade solution
     float g1 = g / (1.f + g);  // one-pole gain

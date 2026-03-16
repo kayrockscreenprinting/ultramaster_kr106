@@ -46,6 +46,7 @@ struct Oscillators {
   float mBlipEnv = 0.f;      // capacitor discharge transient envelope
   float mSubLPState = 0.f;   // sub oscillator passive LP state
   float mNoiseLPState = 0.f; // noise spectral tilt LP state
+  bool mPulseInvert = false; // J106: pulse is positive-first (80017A vs J6's uPD4007)
 
   // Ramp curvature: pos*(1+k*(1-pos)) bows the ramp slightly.
   //
@@ -122,6 +123,7 @@ struct Oscillators {
     if (pw2 < 0.f)
       pw2 += 1.f;
     pulse += PolyBLEP(pw2, cps);    // rising edge at PW crossing
+    if (mPulseInvert) pulse = -pulse; // J106: 80017A outputs positive-first pulse
 
     // --- Sub: CD4013 flip-flop + polyBLEP ---
     // Half-frequency square wave, phase-locked to saw reset.
