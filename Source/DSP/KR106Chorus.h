@@ -24,10 +24,11 @@
 //   LFO rate:  0.45 Hz (confirmed triangle, antiphase at -179°)
 //   Mod depth: ±3.2 ms (averaged L/R)
 //   BBD gain:  ~3-5 dB over dry level
-//   BBD bandwidth: gentle rolloff, 1-pole fit at ~14 kHz (-3 dB at ~10 kHz)
-//     This is the combined response of the anti-aliasing filter, the BBD's
-//     inherent sinc rolloff from sample-and-hold, and the reconstruction
-//     filter. A single 1-pole models the total measured response.
+//   BBD bandwidth: gentle rolloff (-3 dB at ~10 kHz)
+//     Modeled as three stages: 15 kHz pre-filter (anti-aliasing),
+//     clock-rate-dependent BBD filter (Nyquist = 256 stages / 4×delay),
+//     and 15 kHz post-filter (reconstruction). Total ~-18 dB/oct.
+//     Charge-well saturation models MN3009 nonlinearity at high levels.
 //
 // Mode I+II has 2.6/20 = 0.13x the Vpp of I/II, so depth ≈ ±0.42 ms.
 // At 8 Hz with low depth, this is pitch vibrato, not chorus.
@@ -91,18 +92,22 @@ struct TPT1
 // ============================================================
 struct BBDLine
 {
+  static constexpr int kNumStages = 256;           // MN3009
+  static constexpr float kFixedFilterHz = 15000.f; // pre/post anti-aliasing
+
   std::vector<float> mBuf;
   int mMask = 0;
   int mWPos = 0;
 
-  // Single 1-pole at ~14 kHz models the total measured BBD response:
-  // anti-aliasing + sinc rolloff + reconstruction combined.
-  // Measurement: flat to 4 kHz, -3 dB at 10 kHz, -3.5 dB at 15 kHz.
-  // Best fit: 1-pole at 14 kHz (RMSE 0.92 dB over 2–18 kHz).
-  TPT1 mBBDFilter;
-  float mFilterG = 0.f;
+  // Fixed 15 kHz pre/post filters (anti-aliasing + reconstruction)
+  TPT1 mPreLPF;
+  TPT1 mPostLPF;
+  float mFixedG = 0.f;
 
-  static constexpr float kBBDFilterHz = 14000.f;
+  // Modulated BBD-bandwidth filter (inline 1-pole TPT state)
+  // Cutoff tracks BBD Nyquist = kNumStages / (4 * delay_seconds),
+  // so bandwidth sweeps with the LFO: ~10 kHz at max delay, ~21 kHz at center.
+  float mBBD_S1 = 0.f;
 
   float mSampleRate = 44100.f;
 
@@ -118,17 +123,21 @@ struct BBDLine
     mMask = len - 1;
     mWPos = 0;
 
-    float fc = std::min(kBBDFilterHz, sampleRate * 0.45f);
-    mFilterG = tanf(static_cast<float>(M_PI) * fc / sampleRate);
+    float fc = std::min(kFixedFilterHz, sampleRate * 0.45f);
+    mFixedG = tanf(static_cast<float>(M_PI) * fc / sampleRate);
 
-    mBBDFilter.Reset();
+    mPreLPF.Reset();
+    mPostLPF.Reset();
+    mBBD_S1 = 0.f;
   }
 
   void Clear()
   {
     std::fill(mBuf.begin(), mBuf.end(), 0.f);
     mWPos = 0;
-    mBBDFilter.Reset();
+    mPreLPF.Reset();
+    mPostLPF.Reset();
+    mBBD_S1 = 0.f;
   }
 
   // 4-point Hermite interpolation for fractional delay
@@ -158,16 +167,47 @@ struct BBDLine
 
   float Process(float input, float delaySamples)
   {
-    mBuf[mWPos & mMask] = input;
+    // 1. Pre-filter (anti-aliasing, 15 kHz)
+    float filtered = mPreLPF.Process(input, mFixedG);
+
+    // 2. Write to delay buffer
+    mBuf[mWPos & mMask] = filtered;
+
+    // 3. Read with Hermite interpolation
     float wet = ReadHermite(delaySamples);
+
+    // 4. Advance write position
     mWPos = (mWPos + 1) & mMask;
 
-    // BBD bandwidth filter
-    wet = mBBDFilter.Process(wet, mFilterG);
+    // 5. Charge-well saturation: models cumulative charge transfer
+    //    nonlinearity across 256 MN3009 stages. Linear below ±0.7,
+    //    gently compresses peaks above that threshold.
+    if (fabsf(wet) > 0.7f)
+    {
+      float sign = (wet > 0.f) ? 1.f : -1.f;
+      float d = fabsf(wet) - 0.7f;
+      wet = sign * (0.7f + d / (1.f + 2.f * d));
+    }
+
+    // 6. Modulated BBD-bandwidth lowpass (1-pole TPT)
+    //    Cutoff = BBD Nyquist = kNumStages / (4 * delay_seconds).
+    //    Combined with pre/post 15 kHz filters gives ~-18 dB/oct total.
+    float delaySec = delaySamples / mSampleRate;
+    float bbdNyquist = static_cast<float>(kNumStages) / (4.f * delaySec);
+    float nyq = mSampleRate * 0.45f;
+    float cutoff = std::min(bbdNyquist, nyq);
+    float gBBD = tanf(static_cast<float>(M_PI) * cutoff / mSampleRate);
+
+    float v1 = (wet - mBBD_S1) * gBBD / (1.f + gBBD);
+    float lp1 = mBBD_S1 + v1;
+    mBBD_S1 = lp1 + v1;
+    wet = lp1;
+
+    // 7. Post-filter (reconstruction, 15 kHz)
+    wet = mPostLPF.Process(wet, mFixedG);
 
     // NaN guard
-    if (!(mBBDFilter.mS > -100.f && mBBDFilter.mS < 100.f))
-      mBBDFilter.mS = 0.f;
+    if (!(mBBD_S1 > -100.f && mBBD_S1 < 100.f)) mBBD_S1 = 0.f;
 
     return wet;
   }
@@ -305,8 +345,12 @@ struct Chorus
       mLine0.mWPos = (mLine0.mWPos + 1) & mLine0.mMask;
       mLine1.mBuf[mLine1.mWPos & mLine1.mMask] = input;
       mLine1.mWPos = (mLine1.mWPos + 1) & mLine1.mMask;
-      mLine0.mBBDFilter.mS = input;
-      mLine1.mBBDFilter.mS = input;
+      mLine0.mPreLPF.mS = input;
+      mLine0.mPostLPF.mS = input;
+      mLine0.mBBD_S1 = input;
+      mLine1.mPreLPF.mS = input;
+      mLine1.mPostLPF.mS = input;
+      mLine1.mBBD_S1 = input;
       // Keep LFO running so phase is arbitrary on engage (no click)
       mLFO.mPhase += mLFO.mInc;
       if (mLFO.mPhase >= 1.f) mLFO.mPhase -= 1.f;
