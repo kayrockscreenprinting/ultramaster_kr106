@@ -410,6 +410,7 @@ public:
     (void)blockSize;
     mSampleRate = static_cast<float>(sampleRate);
     mADSR.SetSampleRate(mSampleRate);
+    mOsc.Init(mSampleRate);
 
     // Precomputed constants for VCF frequency calculation.
     // VCF modulation works in log-frequency space; these convert

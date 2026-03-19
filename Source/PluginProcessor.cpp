@@ -610,6 +610,7 @@ void KR106AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
   // UI state (backwards-compatible: old hosts just ignore extra bytes)
   stream.writeInt(0x4B523130); // 'KR10' magic
   stream.writeFloat(mUIScale);
+  stream.writeInt(mVoiceCount);
 }
 
 void KR106AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -627,7 +628,14 @@ void KR106AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 
   // Read UI state if present (magic marker check for backwards compatibility)
   if (!stream.isExhausted() && stream.readInt() == 0x4B523130)
+  {
     mUIScale = stream.readFloat();
+    if (!stream.isExhausted())
+    {
+      mVoiceCount = stream.readInt();
+      mDSP.SetActiveVoices(mVoiceCount);
+    }
+  }
 }
 
 // --- Program / Preset management ---

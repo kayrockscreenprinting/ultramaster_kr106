@@ -165,7 +165,14 @@ void KR106Editor::mouseDown(const juce::MouseEvent& e)
     menu.addItem(2, "150%", true, mUIScale == 1.5f);
     menu.addItem(3, "200%", true, mUIScale == 2.f);
 
+    menu.addSeparator();
+    int vc = mProcessor.mVoiceCount;
+    menu.addItem(10, "6 Voices", true, vc == 6);
+    menu.addItem(11, "8 Voices", true, vc == 8);
+    menu.addItem(12, "10 Voices", true, vc == 10);
+
     menu.showMenuAsync({}, [this](int r) {
+        // UI scale
         float s = r == 1 ? 1.f : r == 2 ? 1.5f : r == 3 ? 2.f : 0.f;
         if (s > 0.f && s != mUIScale)
         {
@@ -175,6 +182,13 @@ void KR106Editor::mouseDown(const juce::MouseEvent& e)
                 setTransform({});
             else
                 setTransform(juce::AffineTransform::scale(s));
+        }
+        // Voice count
+        int voices = r == 10 ? 6 : r == 11 ? 8 : r == 12 ? 10 : 0;
+        if (voices > 0 && voices != mProcessor.mVoiceCount)
+        {
+            mProcessor.mVoiceCount = voices;
+            mProcessor.mDSP.SetActiveVoices(voices);
         }
     });
 }

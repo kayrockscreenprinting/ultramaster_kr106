@@ -45,7 +45,8 @@ struct Oscillators {
   uint32_t mRandSeed = 22222;
   float mBlipEnv = 0.f;      // capacitor discharge transient envelope
   float mSubLPState = 0.f;   // sub oscillator passive LP state
-  float mNoiseLPState = 0.f; // noise spectral tilt LP state
+  float mNoiseLPState = 0.f; // noise spectral tilt LP state (TPT integrator)
+  float mNoiseLPG = 0.f;    // TPT coefficient for noise LP (set by Init)
 
   // Pulse duty cycle: J6 vs J106
   //
@@ -103,6 +104,16 @@ struct Oscillators {
   // The 384 kHz ring data was likely a resampler artifact.
   static constexpr float kBlipAmp = 0.15f;
   static constexpr float kBlipDecay = 0.5f;
+
+  // Noise filter cutoff: best-fit to Juno-6 hardware noise spectrum.
+  // Mixer resistor network + analog noise source bandwidth.
+  static constexpr float kNoiseLPHz = 8000.f;
+
+  void Init(float sampleRate) {
+    float fc = std::min(kNoiseLPHz, sampleRate * 0.45f);
+    mNoiseLPG = tanf(static_cast<float>(M_PI) * fc / sampleRate);
+    Reset();
+  }
 
   void Reset() {
     mPos = 0.f;
@@ -193,13 +204,16 @@ struct Oscillators {
       }
       float white = g * 0.5f;
 
-      // Mixer resistor network rolls off highs (~8kHz RC lowpass).
-      mNoiseLPState += 0.7f * (white - mNoiseLPState);
+      // Mixer resistor network rolls off highs (~8 kHz RC lowpass).
+      // TPT 1-pole for sample-rate-independent analog-matched response.
+      float v = (white - mNoiseLPState) * mNoiseLPG / (1.f + mNoiseLPG);
+      float noise = mNoiseLPState + v;
+      mNoiseLPState = noise + v;
 
       // 50K Audio taper pot emulation
       noiseAmp = (std::exp(3.f * noiseAmp) - 1.f) / (std::exp(3.f) - 1.f);
 
-      out += mNoiseLPState * noiseAmp;
+      out += noise * noiseAmp;
     }
 
     return out;

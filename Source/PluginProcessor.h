@@ -58,8 +58,9 @@ public:
   // Fast param access for UI controls
   juce::RangedAudioParameter* getParam(int idx) { return mParams[idx]; }
 
-  KR106DSP<float> mDSP{6};
+  KR106DSP<float> mDSP;
   float mUIScale = 0.f;  // 0 = auto-detect (default), otherwise 1.0/1.5/2.0
+  int mVoiceCount = 6;   // persisted per instance (6/8/10)
 
   // Scope ring buffer (audio writes, UI reads via timer)
   static constexpr int kScopeRingSize = 4096;

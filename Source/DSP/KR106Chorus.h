@@ -8,32 +8,47 @@
 //
 // Architecture (from Juno-6 schematic + measurements, March 2026):
 //
-// The Juno-6 chorus is a stereo BBD effect with NO dry signal path.
-// Both outputs are BBD delay lines — "Mono" jack = tap 0, "Stereo" jack = tap 1.
-// A single triangle-wave LFO drives both MN3009 BBD clocks in antiphase:
-//   tap0 clock = center_clock + lfo(t) * depth
-//   tap1 clock = center_clock - lfo(t) * depth
+// The Juno-6 chorus uses two BBD delay lines mixed with dry signal.
+// Each output jack has an IC6 inverting summer combining dry (100K/47K)
+// and wet (100K/39K). "Mono" jack = dry + tap 0, "Stereo" jack = dry + tap 1.
+// A single triangle-wave LFO drives both MN3009 BBD clock VCOs in antiphase:
+//   tap0 clock = center_clock + lfo(t) * clock_depth
+//   tap1 clock = center_clock - lfo(t) * clock_depth
+//
+// Delay is an emergent inverse property of clock frequency:
+//   delay = N_stages / (2 * f_clock)
+// This produces a hyperbolic sweep in delay space — the delay lingers at
+// long values (closely-spaced comb notches, deeper cancellation) and sweeps
+// quickly through short delays. A symmetric triangle in clock-frequency
+// space becomes asymmetric in delay-time space.
 //
 // Mode switching (SW4/SW5) selects resistor values in the LFO circuit,
-// changing rate and depth simultaneously. From schematic annotations:
+// changing rate and clock excursion simultaneously. From schematic:
 //   I:    triangle, 20 Vpp, 2.5s period (0.4 Hz)
 //   II:   triangle, 20 Vpp, 1.5s period (0.67 Hz)
 //   I+II: sine,     2.6 Vpp, 124ms period (8 Hz) — vibrato character
 //
 // Measured parameters (Chorus I, 496 Hz sine, Juno-6 serial# unknown):
 //   LFO rate:  0.45 Hz (confirmed triangle, antiphase at -179°)
-//   Mod depth: ±3.2 ms (averaged L/R)
 //   BBD gain:  ~3-5 dB over dry level
 //   BBD bandwidth: gentle rolloff (-3 dB at ~10 kHz)
-//     Modeled as three stages: 15 kHz pre-filter (anti-aliasing),
-//     clock-rate-dependent BBD filter (Nyquist = 256 stages / 4×delay),
-//     and 15 kHz post-filter (reconstruction). Total ~-18 dB/oct.
-//     Charge-well saturation models MN3009 nonlinearity at high levels.
 //
-// Mode I+II has 2.6/20 = 0.13x the Vpp of I/II, so depth ≈ ±0.42 ms.
-// At 8 Hz with low depth, this is pitch vibrato, not chorus.
-// The narrower stereo width measured for I+II (0.73 L/R correlation vs 0.51)
-// is simply the smaller delay modulation, not a different architecture.
+// Anti-aliasing and reconstruction filters (Tr13/Tr14 and Tr15/Tr16):
+//   Two identical 2-transistor active filter stages, one before and one
+//   after each MN3009. Each stage has four RC poles:
+//     Pole 1: 10,620 Hz  (R89=22K, C31=680pF — input shunt)
+//     Pole 2:  8,830 Hz  (R88=22K, C33=820pF — first stage)
+//     Pole 3:  7,234 Hz  (R122=10K, C52=2.2nF — MN3009 pin RC)
+//     Pole 4:  4,020 Hz  (R92=22K, C34=1.8nF — interstage, dominant)
+//   Post-filter is a matched mirror: R97/R98, C37(820p), C35(680p),
+//   R95/R96, C38(1.8nF), C36(270p), R100(10K) — identical values.
+//   Combined with the BBD Nyquist-tracking pole (clock-dependent), the
+//   total rolloff is considerably steeper than -18 dB/oct.
+//
+// Clock depth derived from measured delay maximum (~6.2ms for modes I/II).
+// Center clock ≈ 42,667 Hz (from 3.0ms center delay).
+// Mode I/II: clock sweeps ±22 kHz → delay 1.98ms–6.20ms (asymmetric).
+// Mode I+II: clock sweeps ±5.2 kHz → delay 2.67ms–3.42ms (vibrato).
 
 namespace kr106 {
 
@@ -88,26 +103,87 @@ struct TPT1
 };
 
 // ============================================================
+// 4-pole cascaded TPT lowpass — models Tr13/Tr14 (pre) and
+// Tr15/Tr16 (post) active filter stages plus the MN3009
+// input/output RC from the Juno-6 chorus board.
+// Identical topology and values on both sides.
+//
+// Pole frequencies from schematic RC pairs:
+//   Pole 1: R89(22K) + C31(680pF) → 10,620 Hz  (input shunt)
+//   Pole 2: R88(22K) + C33(820pF) →  8,830 Hz  (first stage)
+//   Pole 3: R122(10K) + C52(2.2nF) → 7,234 Hz  (MN3009 pin RC)
+//   Pole 4: R92(22K) + C34(1.8nF) →  4,020 Hz  (interstage, dominant)
+// ============================================================
+struct BBDFilter
+{
+  TPT1 mPole1, mPole2, mPole3, mPole4;
+  float mG1 = 0.f, mG2 = 0.f, mG3 = 0.f, mG4 = 0.f;
+
+  // 1 / (2 * pi * R * C)
+  static constexpr float kPole1Hz = 10620.f; // R89/C31
+  static constexpr float kPole2Hz =  8830.f; // R88/C33
+  static constexpr float kPole3Hz =  7234.f; // R122/C52 (MN3009 pin)
+  static constexpr float kPole4Hz =  4020.f; // R92/C34 (dominant)
+
+  void Init(float sampleRate)
+  {
+    auto safeG = [&](float hz) {
+      float fc = std::min(hz, sampleRate * 0.45f);
+      return tanf(static_cast<float>(M_PI) * fc / sampleRate);
+    };
+    mG1 = safeG(kPole1Hz);
+    mG2 = safeG(kPole2Hz);
+    mG3 = safeG(kPole3Hz);
+    mG4 = safeG(kPole4Hz);
+    Reset();
+  }
+
+  void Reset()
+  {
+    mPole1.Reset();
+    mPole2.Reset();
+    mPole3.Reset();
+    mPole4.Reset();
+  }
+
+  // Set all integrator states (for click-free bypass warmth)
+  void SetState(float value)
+  {
+    mPole1.mS = value;
+    mPole2.mS = value;
+    mPole3.mS = value;
+    mPole4.mS = value;
+  }
+
+  float Process(float input)
+  {
+    float x = mPole1.Process(input, mG1);
+    x = mPole2.Process(x, mG2);
+    x = mPole3.Process(x, mG3);
+    x = mPole4.Process(x, mG4);
+    return x;
+  }
+};
+
+// ============================================================
 // BBD delay line — one MN3009 signal path
 // ============================================================
 struct BBDLine
 {
-  static constexpr int kNumStages = 256;           // MN3009
-  static constexpr float kFixedFilterHz = 15000.f; // pre/post anti-aliasing
+  static constexpr int kNumStages = 256; // MN3009
 
   std::vector<float> mBuf;
   int mMask = 0;
   int mWPos = 0;
 
-  // Fixed 15 kHz pre/post filters (anti-aliasing + reconstruction)
-  TPT1 mPreLPF;
-  TPT1 mPostLPF;
-  float mFixedG = 0.f;
+  // 4-pole pre/post filters (matched anti-aliasing + reconstruction pair)
+  BBDFilter mPreFilter;
+  BBDFilter mPostFilter;
 
-  // Modulated BBD-bandwidth filter (inline 1-pole TPT state)
-  // Cutoff tracks BBD Nyquist = kNumStages / (4 * delay_seconds),
-  // so bandwidth sweeps with the LFO: ~10 kHz at max delay, ~21 kHz at center.
-  float mBBD_S1 = 0.f;
+  // No BBD ZOH filter needed: the MN3009 staircase output has a
+  // sinc(f/f_clock) envelope, but that only matters at ~43 kHz
+  // (the MN3101 clock frequency), which is well above audio band.
+  // We don't model the clock noise, so there's nothing to filter.
 
   float mSampleRate = 44100.f;
 
@@ -123,21 +199,16 @@ struct BBDLine
     mMask = len - 1;
     mWPos = 0;
 
-    float fc = std::min(kFixedFilterHz, sampleRate * 0.45f);
-    mFixedG = tanf(static_cast<float>(M_PI) * fc / sampleRate);
-
-    mPreLPF.Reset();
-    mPostLPF.Reset();
-    mBBD_S1 = 0.f;
+    mPreFilter.Init(sampleRate);
+    mPostFilter.Init(sampleRate);
   }
 
   void Clear()
   {
     std::fill(mBuf.begin(), mBuf.end(), 0.f);
     mWPos = 0;
-    mPreLPF.Reset();
-    mPostLPF.Reset();
-    mBBD_S1 = 0.f;
+    mPreFilter.Reset();
+    mPostFilter.Reset();
   }
 
   // 4-point Hermite interpolation for fractional delay
@@ -167,8 +238,8 @@ struct BBDLine
 
   float Process(float input, float delaySamples)
   {
-    // 1. Pre-filter (anti-aliasing, 15 kHz)
-    float filtered = mPreLPF.Process(input, mFixedG);
+    // 1. Pre-filter (4-pole anti-aliasing: 10.6k / 8.8k / 7.2k / 4.0k Hz)
+    float filtered = mPreFilter.Process(input);
 
     // 2. Write to delay buffer
     mBuf[mWPos & mMask] = filtered;
@@ -189,25 +260,8 @@ struct BBDLine
       wet = sign * (0.7f + d / (1.f + 2.f * d));
     }
 
-    // 6. Modulated BBD-bandwidth lowpass (1-pole TPT)
-    //    Cutoff = BBD Nyquist = kNumStages / (4 * delay_seconds).
-    //    Combined with pre/post 15 kHz filters gives ~-18 dB/oct total.
-    float delaySec = delaySamples / mSampleRate;
-    float bbdNyquist = static_cast<float>(kNumStages) / (4.f * delaySec);
-    float nyq = mSampleRate * 0.45f;
-    float cutoff = std::min(bbdNyquist, nyq);
-    float gBBD = tanf(static_cast<float>(M_PI) * cutoff / mSampleRate);
-
-    float v1 = (wet - mBBD_S1) * gBBD / (1.f + gBBD);
-    float lp1 = mBBD_S1 + v1;
-    mBBD_S1 = lp1 + v1;
-    wet = lp1;
-
-    // 7. Post-filter (reconstruction, 15 kHz)
-    wet = mPostLPF.Process(wet, mFixedG);
-
-    // NaN guard
-    if (!(mBBD_S1 > -100.f && mBBD_S1 < 100.f)) mBBD_S1 = 0.f;
+    // 6. Post-filter (4-pole reconstruction, matched to pre-filter)
+    wet = mPostFilter.Process(wet);
 
     return wet;
   }
@@ -232,23 +286,38 @@ struct Chorus
   // measured -3 dB at ~10 kHz.
   static constexpr float kCenterDelayMs = 3.0f;
 
+  // Center clock frequency derived from center delay:
+  // f_clock = N_stages / (2 * delay_sec) = 256 / (2 * 0.003) ≈ 42,667 Hz
+  static constexpr float kCenterClockHz =
+      static_cast<float>(BBDLine::kNumStages) / (2.f * kCenterDelayMs * 0.001f);
+
+  // Floor clock freq — prevents delay exceeding buffer length
+  static constexpr float kMinClockHz = 5000.f;
+
   // Mode I: measured 0.45 Hz, schematic says 0.4 Hz / 2.5s.
   // Mode II: schematic says 0.67 Hz / 1.5s.
-  // Both at 20 Vpp — same depth.
+  // Both at 20 Vpp — same clock excursion.
   static constexpr float kChorusIRate  = 0.45f;
   static constexpr float kChorusIIRate = 0.67f;
 
-  // Mode I depth: measured ±3.2 ms (average of L and R).
-  // Mode II: same 20 Vpp → same depth.
-  static constexpr float kChorusIDepth  = 3.2f;
-  static constexpr float kChorusIIDepth = 3.2f;
+  // Clock depth in Hz — derived from measured delay maxima.
+  // LFO modulates clock VCO, delay is inverse: delay = N/(2*f_clock).
+  // clock_depth = kCenterClockHz - N/(2 * delay_max_sec)
+  //
+  // Mode I/II: delay_max ≈ 6.2ms → clock_min ≈ 20,645 Hz
+  // clock_depth ≈ 22,022 Hz; gives delay_min ≈ 1.98ms
+  static constexpr float kChorusIClockDepth = kCenterClockHz
+      - static_cast<float>(BBDLine::kNumStages) / (2.f * 0.0062f);
+  static constexpr float kChorusIIClockDepth = kChorusIClockDepth; // same Vpp
 
-  // Mode I+II: 8 Hz sine, 2.6 Vpp = 0.13x of 20 Vpp → ±0.42 ms.
-  // This is pitch vibrato, not traditional chorus.
+  // Mode I+II: 8 Hz sine, 2.6 Vpp = 0.13x of 20 Vpp.
+  // delay_max ≈ 3.42ms → clock_depth ≈ 5,240 Hz
+  // Pitch vibrato, not traditional chorus.
   static constexpr float kChorusI_IIRate  = 8.0f;
-  static constexpr float kChorusI_IIDepth = 0.42f;
+  static constexpr float kChorusI_IIClockDepth = kCenterClockHz
+      - static_cast<float>(BBDLine::kNumStages) / (2.f * 0.00342f);
 
-  // Dry/wet mix from schematic: IC8 inverting summer per channel.
+  // Dry/wet mix from schematic: IC6 inverting summer per channel.
   //   Dry: -R70/R71 = -100K/47K = gain 2.128
   //   Wet: -R70/R72 = -100K/39K = gain 2.564
   // Measured chorus ON vs OFF: ~3-5 dB boost (using +4 dB midpoint = 1.585x).
@@ -263,9 +332,9 @@ struct Chorus
   float mFadeTarget = 0.f;
   float mFadeInc = 0.f;
 
-  // Smoothed depth for mode transitions
-  float mDepth = 0.f;
-  float mTargetDepth = 0.f;
+  // Smoothed clock depth (Hz) for mode transitions
+  float mClockDepth = 0.f;
+  float mTargetClockDepth = 0.f;
 
   void Init(float sampleRate)
   {
@@ -279,7 +348,7 @@ struct Chorus
     if (mMode > 0)
     {
       ConfigureMode();
-      mDepth = mTargetDepth;
+      mClockDepth = mTargetClockDepth;
       mFade = mFadeTarget = 1.f;
     }
   }
@@ -332,7 +401,7 @@ struct Chorus
       if (mMode > 0)
       {
         ConfigureMode();
-        mDepth = mTargetDepth;
+        mClockDepth = mTargetClockDepth;
         mFadeTarget = 1.f;
       }
     }
@@ -346,12 +415,10 @@ struct Chorus
       mLine0.mWPos = (mLine0.mWPos + 1) & mLine0.mMask;
       mLine1.mBuf[mLine1.mWPos & mLine1.mMask] = input;
       mLine1.mWPos = (mLine1.mWPos + 1) & mLine1.mMask;
-      mLine0.mPreLPF.mS = input;
-      mLine0.mPostLPF.mS = input;
-      mLine0.mBBD_S1 = input;
-      mLine1.mPreLPF.mS = input;
-      mLine1.mPostLPF.mS = input;
-      mLine1.mBBD_S1 = input;
+      mLine0.mPreFilter.SetState(input);
+      mLine0.mPostFilter.SetState(input);
+      mLine1.mPreFilter.SetState(input);
+      mLine1.mPostFilter.SetState(input);
       // Keep LFO running so phase is arbitrary on engage (no click)
       mLFO.mPhase += mLFO.mInc;
       if (mLFO.mPhase >= 1.f) mLFO.mPhase -= 1.f;
@@ -359,21 +426,24 @@ struct Chorus
       return;
     }
 
-    // Smooth depth
-    mDepth += (mTargetDepth - mDepth) * mFadeInc;
+    // Smooth clock depth
+    mClockDepth += (mTargetClockDepth - mClockDepth) * mFadeInc;
 
     // Single LFO, antiphase for L/R
     float lfo = mUseSine ? mLFO.Sine() : mLFO.Triangle();
 
-    float delay0ms = kCenterDelayMs + mDepth * lfo;
-    float delay1ms = kCenterDelayMs - mDepth * lfo; // antiphase: single LFO inverted
+    // LFO modulates clock frequency — physically correct for BBD.
+    // Delay is the inverse: delay = N_stages / (2 * f_clock).
+    // This produces a hyperbolic sweep in delay space: lingers at
+    // long delays (deep comb notches) and zips through short delays.
+    float clock0 = kCenterClockHz + mClockDepth * lfo;
+    float clock1 = kCenterClockHz - mClockDepth * lfo;
+    clock0 = std::max(clock0, kMinClockHz);
+    clock1 = std::max(clock1, kMinClockHz);
 
-    float delay0samp = delay0ms * 0.001f * mSampleRate;
-    float delay1samp = delay1ms * 0.001f * mSampleRate;
-
-    // Clamp to positive delay (can't read the future)
-    delay0samp = std::max(delay0samp, 1.f);
-    delay1samp = std::max(delay1samp, 1.f);
+    constexpr float kHalfStages = static_cast<float>(BBDLine::kNumStages) * 0.5f;
+    float delay0samp = kHalfStages / clock0 * mSampleRate;
+    float delay1samp = kHalfStages / clock1 * mSampleRate;
 
     float wet0 = mLine0.Process(input, delay0samp);
     float wet1 = mLine1.Process(input, delay1samp);
@@ -393,17 +463,17 @@ private:
     {
       case 1:
         mLFO.SetRate(kChorusIRate, mSampleRate);
-        mTargetDepth = kChorusIDepth;
+        mTargetClockDepth = kChorusIClockDepth;
         mUseSine = false;
         break;
       case 2:
         mLFO.SetRate(kChorusIIRate, mSampleRate);
-        mTargetDepth = kChorusIIDepth;
+        mTargetClockDepth = kChorusIIClockDepth;
         mUseSine = false;
         break;
       case 3:
         mLFO.SetRate(kChorusI_IIRate, mSampleRate);
-        mTargetDepth = kChorusI_IIDepth;
+        mTargetClockDepth = kChorusI_IIClockDepth;
         mUseSine = true;
         break;
     }

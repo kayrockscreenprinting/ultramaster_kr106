@@ -109,14 +109,19 @@ template <typename T>
 class KR106DSP
 {
 public:
-  KR106DSP(int nVoices)
+  static constexpr int kMaxVoices = 10;
+
+  KR106DSP(int nVoices = kMaxVoices)
   {
-    for (int i = 0; i < nVoices; i++)
+    mActiveVoices = std::min(nVoices, kMaxVoices);
+    for (int i = 0; i < kMaxVoices; i++)
     {
       auto voice = std::make_unique<kr106::Voice<T>>();
       voice->InitVariance(i);
       mVoices.push_back(std::move(voice));
     }
+    std::fill(std::begin(mVoiceNote), std::end(mVoiceNote), -1);
+    std::fill(std::begin(mVoiceAge), std::end(mVoiceAge), int64_t(0));
     mLFOBuffer.reserve(4096);
     mLFORawBuffer.reserve(4096);
     mSyncBuffer.reserve(4096);
@@ -140,60 +145,64 @@ public:
     double pitch = MidiToPitch(note);
     float vel = velocity / 127.f;
     bool anyBusy = false;
-    ForEachVoice([&](kr106::Voice<T>& v) { anyBusy |= v.GetBusy(); });
-    ForEachVoice([pitch, vel, anyBusy, note](kr106::Voice<T>& v) {
+    for (int i = 0; i < mActiveVoices; i++) anyBusy |= mVoices[i]->GetBusy();
+    for (int i = 0; i < mActiveVoices; i++)
+    {
+      auto& v = *mVoices[i];
       v.mMidiNote = note;
       v.SetUnisonPitch(pitch);
       v.Trigger(vel, anyBusy);
-    });
+    }
   }
 
   void ReleaseUnisonVoices()
   {
+    // Release ALL voices — excess voices from a previous higher count
+    // may still be sounding (unison doesn't use mVoiceNote to track).
     ForEachVoice([](kr106::Voice<T>& v) { v.Release(); });
   }
 
   void GlideUnisonVoices(int note)
   {
     double pitch = MidiToPitch(note);
-    ForEachVoice([pitch, note](kr106::Voice<T>& v) {
+    for (int i = 0; i < mActiveVoices; i++)
+    {
+      auto& v = *mVoices[i];
       v.mMidiNote = note;
       v.SetUnisonPitch(pitch);
-    });
+    }
   }
 
   int FindLowestFreeVoice()
   {
-    int nv = static_cast<int>(NVoices());
-    for (int i = 0; i < nv; i++)
+    for (int i = 0; i < mActiveVoices; i++)
       if (mVoiceNote[i] < 0 && mVoices[i]->GetBusy()) return i;
-    for (int i = 0; i < nv; i++)
+    for (int i = 0; i < mActiveVoices; i++)
       if (!mVoices[i]->GetBusy()) return i;
     int oldest = 0;
     int64_t oldestAge = mVoiceAge[0];
-    for (int i = 1; i < nv; i++)
+    for (int i = 1; i < mActiveVoices; i++)
       if (mVoiceAge[i] < oldestAge) { oldestAge = mVoiceAge[i]; oldest = i; }
     return oldest;
   }
 
   int FindRoundRobinVoice()
   {
-    int nv = static_cast<int>(NVoices());
-    for (int j = 0; j < nv; j++)
+    for (int j = 0; j < mActiveVoices; j++)
     {
-      int i = (mRoundRobinNext + j) % nv;
-      if (!mVoices[i]->GetBusy()) { mRoundRobinNext = (i + 1) % nv; return i; }
+      int i = (mRoundRobinNext + j) % mActiveVoices;
+      if (!mVoices[i]->GetBusy()) { mRoundRobinNext = (i + 1) % mActiveVoices; return i; }
     }
-    for (int j = 0; j < nv; j++)
+    for (int j = 0; j < mActiveVoices; j++)
     {
-      int i = (mRoundRobinNext + j) % nv;
-      if (mVoiceNote[i] < 0) { mRoundRobinNext = (i + 1) % nv; return i; }
+      int i = (mRoundRobinNext + j) % mActiveVoices;
+      if (mVoiceNote[i] < 0) { mRoundRobinNext = (i + 1) % mActiveVoices; return i; }
     }
     int oldest = 0;
     int64_t oldestAge = mVoiceAge[0];
-    for (int i = 1; i < nv; i++)
+    for (int i = 1; i < mActiveVoices; i++)
       if (mVoiceAge[i] < oldestAge) { oldestAge = mVoiceAge[i]; oldest = i; }
-    mRoundRobinNext = (oldest + 1) % nv;
+    mRoundRobinNext = (oldest + 1) % mActiveVoices;
     return oldest;
   }
 
@@ -406,8 +415,9 @@ public:
   int mPortaMode = 2;
   int mUnisonNote = -1;
   std::vector<int> mUnisonStack;
-  int mVoiceNote[6] = {-1,-1,-1,-1,-1,-1};
-  int64_t mVoiceAge[6] = {0,0,0,0,0,0};
+  int mActiveVoices = 6;
+  int mVoiceNote[kMaxVoices] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
+  int64_t mVoiceAge[kMaxVoices] = {};
   int64_t mVoiceAgeCounter = 0;
   int mRoundRobinNext = 0;
   bool mChorusI = false;
@@ -448,9 +458,24 @@ public:
     mKeysDown.reset();
     mHeldNotes.reset();
     ForEachVoice([](kr106::Voice<T>& v) { v.Release(); });
-    for (int i = 0; i < 6; i++) mVoiceNote[i] = -1;
+    std::fill(std::begin(mVoiceNote), std::end(mVoiceNote), -1);
     mUnisonNote = -1;
     mUnisonStack.clear();
+  }
+
+  void SetActiveVoices(int n)
+  {
+    n = std::clamp(n, 1, kMaxVoices);
+    if (n == mActiveVoices) return;
+    // Release ALL voices beyond the new limit — unison mode doesn't
+    // set mVoiceNote, so we can't rely on it to detect busy voices.
+    for (int i = n; i < kMaxVoices; i++)
+    {
+      mVoices[i]->Release();
+      mVoiceNote[i] = -1;
+    }
+    mActiveVoices = n;
+    if (mRoundRobinNext >= n) mRoundRobinNext = 0;
   }
 
   void ForceRelease(int noteNum)
