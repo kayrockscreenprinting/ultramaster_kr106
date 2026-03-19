@@ -4,6 +4,7 @@ project(KR106 VERSION 2.1.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
 
 add_subdirectory(libs/JUCE)
+add_subdirectory(libs/clap-juce-extensions EXCLUDE_FROM_ALL)
 
 # Platform-specific plugin formats
 if(APPLE)
@@ -64,4 +65,9 @@ target_link_libraries(KR106 PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
     KR106BinaryData
+)
+
+clap_juce_extensions_plugin(TARGET KR106
+    CLAP_ID "com.UMG.KR106"
+    CLAP_FEATURES instrument synthesizer "virtual analog" analog
 )
