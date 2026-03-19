@@ -144,7 +144,9 @@ public:
     // Position below slider, sized to fit text (like tooltip)
     auto srcBounds = parent->getLocalArea(getParentComponent(), getBounds());
     juce::Font font{juce::FontOptions(11.f)};
-    int tw = std::max(50, juce::roundToInt(font.getStringWidthFloat(displayText)) + 16);
+    juce::GlyphArrangement glyphs;
+    glyphs.addLineOfText(font, displayText, 0.f, 0.f);
+    int tw = std::max(50, juce::roundToInt(glyphs.getBoundingBox(0, -1, false).getWidth()) + 16);
     int th = 16;
     int tx = srcBounds.getCentreX() - tw / 2;
     int ty = srcBounds.getBottom() + 2;
