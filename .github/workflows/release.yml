@@ -177,7 +177,6 @@ jobs:
           cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
           cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
           cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
-          cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
           cp -R "$ARTS/Standalone/Ultramaster KR-106" pkg/
           cat > pkg/INSTALL.txt << 'EOF'
           Ultramaster KR-106 — Linux Installation
@@ -185,7 +184,6 @@ jobs:
           VST3:       Copy the "Ultramaster KR-106.vst3" folder to ~/.vst3/
           CLAP:       Copy "Ultramaster KR-106.clap" to ~/.clap/
           LV2:        Copy the "Ultramaster KR-106.lv2" folder to ~/.lv2/
-          CLAP:       Copy the "Ultramaster KR-106.clap" folder to ~/.clap/
           Standalone: Put "Ultramaster KR-106" anywhere on your PATH.
 
           After copying, restart your DAW to scan for new plugins.

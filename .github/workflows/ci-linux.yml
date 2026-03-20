@@ -37,6 +37,7 @@ jobs:
           name: KR106-linux-x86_64
           path: |
             build/KR106_artefacts/**/VST3/
+            build/KR106_artefacts/**/CLAP/
             build/KR106_artefacts/**/LV2/
             build/KR106_artefacts/**/Standalone/
 
@@ -69,6 +70,6 @@ jobs:
           name: KR106-linux-arm64
           path: |
             build/KR106_artefacts/**/VST3/
-            build/KR106_artefacts/**/LV2/
             build/KR106_artefacts/**/CLAP/
+            build/KR106_artefacts/**/LV2/
             build/KR106_artefacts/**/Standalone/
