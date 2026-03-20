@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 
@@ -176,8 +177,57 @@ jobs:
           name: KR106-Linux
           path: KR106-Linux.zip
 
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libfreetype-dev \
+            libwebkit2gtk-4.1-dev \
+            mesa-common-dev libgl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        run: |
+          mkdir -p pkg
+          ARTS=build/KR106_artefacts
+          if [ -d "$ARTS/Release/VST3" ]; then ARTS="$ARTS/Release"; fi
+          cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
+          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
+          cp -R "$ARTS/Standalone/Ultramaster KR-106" pkg/
+          cat > pkg/INSTALL.txt << 'EOF'
+          Ultramaster KR-106 — Linux (ARM64) Installation
+
+          For Raspberry Pi and other ARM64 Linux systems.
+
+          VST3:       Copy the "Ultramaster KR-106.vst3" folder to ~/.vst3/
+          LV2:        Copy the "Ultramaster KR-106.lv2" folder to ~/.lv2/
+          Standalone: Put "Ultramaster KR-106" anywhere on your PATH.
+
+          After copying, restart your DAW to scan for new plugins.
+          EOF
+          cd pkg && zip -r ../KR106-Linux-arm64.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KR106-Linux-arm64
+          path: KR106-Linux-arm64.zip
+
   release:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux, build-linux-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -193,4 +243,5 @@ jobs:
             artifacts/KR106-macOS/KR106-macOS.zip
             artifacts/KR106-Windows/KR106-Windows.zip
             artifacts/KR106-Linux/KR106-Linux.zip
+            artifacts/KR106-Linux-arm64/KR106-Linux-arm64.zip
           generate_release_notes: true
