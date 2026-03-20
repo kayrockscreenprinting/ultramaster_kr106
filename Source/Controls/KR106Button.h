@@ -107,6 +107,40 @@ private:
 };
 
 // ============================================================================
+// KR106ClipLED — Standalone LED that lights when a level exceeds a threshold.
+// Driven from timerCallback by reading an atomic peak value.
+// Size: 9x9 @1x (uses same 18x36 @2x two-frame strip as ButtonLED).
+// ============================================================================
+class KR106ClipLED : public juce::Component
+{
+public:
+    KR106ClipLED(const juce::Image& ledImage, float threshold)
+        : mLedImage(ledImage), mThreshold(threshold) {}
+
+    void paint(juce::Graphics& g) override
+    {
+        int frameW2x = mLedImage.getWidth();
+        int frameH2x = mLedImage.getHeight() / 2;
+        int frameY2x = mLit ? frameH2x : 0;
+        g.drawImage(mLedImage,
+                    0.f, 0.f, frameW2x / 2.f, frameH2x / 2.f,
+                    0, frameY2x, frameW2x, frameH2x);
+    }
+
+    // Call from timerCallback with the current peak value
+    void update(float peak)
+    {
+        bool lit = peak >= mThreshold;
+        if (lit != mLit) { mLit = lit; repaint(); }
+    }
+
+private:
+    juce::Image mLedImage;
+    float mThreshold;
+    bool mLit = false;
+};
+
+// ============================================================================
 // KR106ChorusOff — Cream button that turns off both Chorus I and Chorus II.
 // Size: 17x19.
 // ============================================================================

@@ -82,9 +82,10 @@ def read_pat_patches(path):
         if len(b) != 18:
             continue
 
-        # Continuous params (bytes 0-15, 0-127 → 0.0-1.0)
-        # SysEx bytes are raw ADC from 50KB linear pots — direct mapping.
-        n = [v / 127.0 for v in b[:16]]
+        # Continuous params (bytes 0-15): raw 7-bit values (0-127)
+        # SysEx bytes are raw ADC from 50KB linear pots.
+        # Kept as integers — C++ converts to 0.0-1.0 at load time.
+        n = list(b[:16])
 
         # --- Switches 1 (byte 16) ---
         sw1 = b[16]
@@ -94,13 +95,13 @@ def read_pat_patches(path):
         chorus_off_bit = (sw1 >> 5) & 1  # 0 = chorus ON (inverted)
         chorus_lvl_bit = (sw1 >> 6) & 1  # 1 = level I, 0 = level II
 
-        # Octave: kOctTranspose 0=up(4'), 1=normal(8'), 2=down(16')
+        # Octave: kOctTranspose 0=16'(down), 1=8'(normal), 2=4'(up)
         if oct_bits & 0x04:       # 4'
-            oct_transpose = 0
+            oct_transpose = 2
         elif oct_bits & 0x02:     # 8'
             oct_transpose = 1
         else:                     # 16' or default
-            oct_transpose = 2
+            oct_transpose = 0
 
         # Chorus
         if chorus_off_bit:
@@ -193,26 +194,26 @@ def pat_patch_to_params(p):
     chorus_off = 1 if (chorus_I == 0 and chorus_II == 0) else 0
 
     return [
-        0.0,                                           # kBenderDco (not stored)
-        0.0,                                           # kBenderVcf (not stored)
-        120.0,                                         # kArpRate (default)
-        p['lfo_rate'],                                     # kLfoRate (raw 0-1 slider)
+        0,                                             # kBenderDco (not stored)
+        0,                                             # kBenderVcf (not stored)
+        120,                                           # kArpRate (default BPM)
+        p['lfo_rate'],                                 # kLfoRate (raw 7-bit)
         p['lfo_delay'],                                # kLfoDelay
         p['dco_lfo'],                                  # kDcoLfo
         p['dco_pwm'],                                  # kDcoPwm
         p['dco_sub'],                                  # kDcoSub
         p['dco_noise'],                                # kDcoNoise
-        p['hpf_frq'],                                  # kHpfFreq (0-3 direct)
-        p['vcf_frq'],                                      # kVcfFreq (raw 0-1 slider)
+        p['hpf_frq'],                                  # kHpfFreq (0-3 switch)
+        p['vcf_frq'],                                  # kVcfFreq (raw 7-bit)
         p['vcf_res'],                                  # kVcfRes
         p['vcf_env'],                                  # kVcfEnv
         p['vcf_lfo'],                                  # kVcfLfo
         p['vcf_kbd'],                                  # kVcfKbd
         p['volume'],                                   # kVcaLevel
-        p['env_attack'],                                   # kEnvA (raw 0-1 slider)
-        p['env_decay'],                                    # kEnvD (raw 0-1 slider)
-        p['env_sustain'],                                  # kEnvS (raw 0-1 slider)
-        p['env_release'],                                  # kEnvR (raw 0-1 slider)
+        p['env_attack'],                               # kEnvA (raw 7-bit)
+        p['env_decay'],                                # kEnvD
+        p['env_sustain'],                              # kEnvS
+        p['env_release'],                              # kEnvR
         0,                                             # kTranspose (default off)
         0,                                             # kHold (default off)
         0,                                             # kArpeggio (default off)
@@ -229,19 +230,24 @@ def pat_patch_to_params(p):
         p['dco_pwm_mod'],                              # kPwmMode (0=LFO, 1=MAN)
         p['vcf_env_invert'],                           # kVcfEnvInv
         p['vca_mode'],                                 # kVcaMode
-        0.0,                                           # kBender (not stored)
-        0.0,                                           # kTuning (not stored)
+        0,                                             # kBender (not stored)
+        0,                                             # kTuning (not stored)
         1,                                             # kPower (always on)
         2,                                             # kPortaMode (default Poly)
-        0.0,                                           # kPortaRate (default 0)
+        0,                                             # kPortaRate (default 0)
         0,                                             # kTransposeOffset (default 0)
-        0.0,                                           # kBenderLfo (default 0)
+        0,                                             # kBenderLfo (default 0)
         1,                                             # kAdsrMode (1=Juno-106)
     ]
 
 
+def to7bit(v):
+    """Convert 0.0-1.0 float to 7-bit integer (0-127)."""
+    return int(round(clamp(v, 0.0, 1.0) * 127))
+
+
 def binary_patch_to_params(p):
-    """Convert a UltraMaster binary patch dict to iPlug2 MakePreset() values."""
+    """Convert a UltraMaster binary patch dict to parameter values (ints)."""
     def b(v): return 1 if v > 0.5 else 0
 
     chorus_off = b(1.0 - max(p['chorus_I_switch'], p['chorus_II_switch']))
@@ -250,66 +256,54 @@ def binary_patch_to_params(p):
     pwm_mode = 0 if p['dco_pwm_mod'] < 0.5 else 1
 
     return [
-        clamp(p['bender_dco'], 0.0, 1.0),
-        clamp(p['bender_vcf'], 0.0, 1.0),
-        linear(p['arpeggio_rate'], 90.0, 3000.0),
-        clamp(p['lfo_rate'], 0.0, 1.0),                    # kLfoRate (raw 0-1 slider)
-        clamp(p['lfo_delay'], 0.0, 1.0),
-        clamp(p['dco_lfo'], 0.0, 1.0),
-        clamp(p['dco_pwm'], 0.0, 1.0),
-        clamp(p['dco_sub'], 0.0, 1.0),
-        clamp(p['dco_noise'], 0.0, 1.0),
-        int(round(p['hpf_frq'] / 0.25)),
-        clamp(p['vcf_frq'], 0.0, 1.0),                    # kVcfFreq (raw 0-1 slider)
-        clamp(p['vcf_res'], 0.0, 1.0),
-        clamp(p['vcf_env'], 0.0, 1.0),
-        clamp(p['vcf_lfo'], 0.0, 1.0),
-        clamp(p['vcf_kbd'], 0.0, 1.0),
-        clamp(p['volume'], 0.0, 1.0),
-        clamp(p['env_attack'], 0.0, 1.0),                  # kEnvA (raw 0-1 slider)
-        clamp(p['env_decay'], 0.0, 1.0),                   # kEnvD (raw 0-1 slider)
-        clamp(p['env_sustain'], 0.0, 1.0),                  # kEnvS (raw 0-1 slider)
-        clamp(p['env_release'], 0.0, 1.0),                  # kEnvR (raw 0-1 slider)
-        0,
-        0,
-        b(p['arpeggio_switch']),
-        b(p['dco_pulse_switch']),
-        b(p['dco_saw_switch']),
-        b(p['dco_sub_switch']),
-        chorus_off,
-        b(p['chorus_I_switch']),
-        b(p['chorus_II_switch']),
-        2 - int(round(clamp(p['octave_transpose'], 0.0, 2.0))),  # binary uses 0=DN,2=UP; flip to 0=UP,2=DN
-        int(round(clamp(p['arpeggio_mode'], 0.0, 2.0))),
-        int(round(clamp(p['arpeggio_range'], 0.0, 2.0))),
-        int(round(clamp(p['lfo_mode'], 0.0, 1.0))),
-        pwm_mode,
-        int(round(clamp(p['vcf_env_invert'], 0.0, 1.0))),
-        int(round(clamp(p['vca_mode'], 0.0, 1.0))),
-        0.0,                                           # kBender (not stored)
-        0.0,                                           # kTuning (not stored)
+        to7bit(p['bender_dco']),                       # kBenderDco
+        to7bit(p['bender_vcf']),                       # kBenderVcf
+        120,                                           # kArpRate (default BPM)
+        to7bit(p['lfo_rate']),                         # kLfoRate
+        to7bit(p['lfo_delay']),                        # kLfoDelay
+        to7bit(p['dco_lfo']),                          # kDcoLfo
+        to7bit(p['dco_pwm']),                          # kDcoPwm
+        to7bit(p['dco_sub']),                          # kDcoSub
+        to7bit(p['dco_noise']),                        # kDcoNoise
+        int(round(p['hpf_frq'] / 0.25)),              # kHpfFreq (0-3)
+        to7bit(p['vcf_frq']),                          # kVcfFreq
+        to7bit(p['vcf_res']),                          # kVcfRes
+        to7bit(p['vcf_env']),                          # kVcfEnv
+        to7bit(p['vcf_lfo']),                          # kVcfLfo
+        to7bit(p['vcf_kbd']),                          # kVcfKbd
+        to7bit(p['volume']),                           # kVcaLevel
+        to7bit(p['env_attack']),                       # kEnvA
+        to7bit(p['env_decay']),                        # kEnvD
+        to7bit(p['env_sustain']),                      # kEnvS
+        to7bit(p['env_release']),                      # kEnvR
+        0,                                             # kTranspose
+        0,                                             # kHold
+        b(p['arpeggio_switch']),                       # kArpeggio
+        b(p['dco_pulse_switch']),                      # kDcoPulse
+        b(p['dco_saw_switch']),                        # kDcoSaw
+        b(p['dco_sub_switch']),                        # kDcoSubSw
+        chorus_off,                                    # kChorusOff
+        b(p['chorus_I_switch']),                       # kChorusI
+        b(p['chorus_II_switch']),                      # kChorusII
+        2 - int(round(clamp(p['octave_transpose'], 0.0, 2.0))),  # kOctTranspose
+        int(round(clamp(p['arpeggio_mode'], 0.0, 2.0))),         # kArpMode
+        int(round(clamp(p['arpeggio_range'], 0.0, 2.0))),        # kArpRange
+        int(round(clamp(p['lfo_mode'], 0.0, 1.0))),              # kLfoMode
+        pwm_mode,                                      # kPwmMode
+        int(round(clamp(p['vcf_env_invert'], 0.0, 1.0))),        # kVcfEnvInv
+        int(round(clamp(p['vca_mode'], 0.0, 1.0))),              # kVcaMode
+        0,                                             # kBender (not stored)
+        0,                                             # kTuning (not stored)
         1,                                             # kPower (always on)
         2,                                             # kPortaMode (default Poly)
-        0.0,                                           # kPortaRate (default 0)
+        0,                                             # kPortaRate (default 0)
         0,                                             # kTransposeOffset (default 0)
-        0.0,                                           # kBenderLfo (default 0)
+        0,                                             # kBenderLfo (default 0)
         1,                                             # kAdsrMode (1=Juno-106)
     ]
 
 
 # ── Output ───────────────────────────────────────────────────────────────────
-
-def fmt(v):
-    if isinstance(v, int):
-        return str(v)
-    s = f'{v:.6g}'
-    # Ensure float values always have a decimal point so C++ treats them
-    # as double literals, not int.  MakePreset() uses va_arg(vp, double)
-    # for double-type params — passing an int literal is UB and reads as ~0.
-    if '.' not in s and 'e' not in s and 'E' not in s:
-        s += '.'
-    return s
-
 
 def generate(pat_files, binary_files, out_path):
     all_presets = []
@@ -356,22 +350,33 @@ def generate(pat_files, binary_files, out_path):
             params = binary_patch_to_params(p)
             all_presets.append((name, params))
 
+    # Output JUCE struct format
     lines = [
-        '// Auto-generated by scripts/gen_presets.py — do not edit by hand.',
-        f'// {len(all_presets)} presets from Factory_Patches.pat + david_churcher_patches.',
-        f'// Set kNumPresets = {len(all_presets)} in KR106.h.',
+        '#pragma once',
         '',
+        f'// Auto-generated by tools/preset-gen/gen_presets.py — do not edit by hand.',
+        f'// {len(all_presets)} factory presets. Slider values are raw 7-bit (0-127);',
+        '// C++ constructor converts to 0.0-1.0 at load time.',
+        '',
+        'struct KR106FactoryPreset {',
+        '    const char* name;',
+        '    int values[44];',
+        '};',
+        '',
+        'static constexpr int kNumFactoryPresets = ' + str(len(all_presets)) + ';',
+        '',
+        'static const KR106FactoryPreset kFactoryPresets[] = {',
     ]
     for name, params in all_presets:
-        args = ', '.join(fmt(v) for v in params)
         safe_name = name.replace('\\', '\\\\').replace('"', '\\"')
-        lines.append(f'  MakePreset("{safe_name}", {args});')
+        args = ', '.join(str(v) for v in params)
+        lines.append(f'    {{"{safe_name}", {{{args}}}}},')
+    lines.append('};')
 
     content = '\n'.join(lines) + '\n'
     with open(out_path, 'w') as f:
         f.write(content)
     print(f'Wrote {len(all_presets)} presets to {out_path}')
-    print(f'Set kNumPresets = {len(all_presets)} in KR106.h')
 
 
 if __name__ == '__main__':
@@ -381,7 +386,7 @@ if __name__ == '__main__':
         (f'{script_dir}/Factory_Patches.pat', 'factory'),
     ]
     binary_files = [
-        (f'{script_dir}/david_churcher_patches', 'churcher', lambda i: f'Churcher {i+1:02d}'),
+        # (f'{script_dir}/david_churcher_patches', 'churcher', lambda i: f'Churcher {i+1:02d}'),
     ]
-    out = f'{project_root}/KR106_Presets.h'
+    out = f'{project_root}/Source/KR106_Presets_JUCE.h'
     generate(pat_files, binary_files, out)

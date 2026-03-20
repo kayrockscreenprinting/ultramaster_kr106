@@ -4,6 +4,7 @@
 #include <atomic>
 #include <bitset>
 #include "DSP/KR106_DSP.h"
+#include "KR106PresetManager.h"
 
 // Parameter indices — must match KR106DSP::SetParam's internal enum
 enum EParams
@@ -59,8 +60,29 @@ public:
   juce::RangedAudioParameter* getParam(int idx) { return mParams[idx]; }
 
   KR106DSP<float> mDSP;
+  KR106PresetManager mPresetMgr;
   float mUIScale = 0.f;  // 0 = auto-detect (default), otherwise 1.0/1.5/2.0
   int mVoiceCount = 6;   // persisted per instance (6/8/10)
+  bool mIgnoreVelocity = true; // persisted per instance
+  bool mArpLimitKbd = true;    // persisted per instance
+  bool mInitialDefault = true; // shows "Default" until first preset change
+
+  // Preset CSV operations
+  void reloadPresetsFromFile(const juce::File& file);
+  void saveCurrentPresetToCSV(const juce::String& name);
+  void renameCurrentPreset(const juce::String& name);
+  void clearCurrentPreset();
+  void pastePreset(const KR106Preset& preset);
+  KR106Preset getPreset(int idx) const;
+  bool isCurrentPresetDirty() const;
+  juce::File getPresetCSVPath() const { return KR106PresetManager::getDefaultCSVPath(); }
+
+  // Persist global settings (right-click menu: zoom, voices, etc.)
+  void saveGlobalSettings();
+  void loadGlobalSettings();
+
+  // Clip indicator: peak level before saturator (audio writes, UI reads)
+  std::atomic<float> mPeakLevel{0.f};
 
   // Scope ring buffer (audio writes, UI reads via timer)
   static constexpr int kScopeRingSize = 4096;
@@ -105,6 +127,9 @@ private:
   std::atomic<int> mUIMidiTail{0};
 
   int mCurrentPreset = 0;
+
+  // Flag: emit SysEx dump for current preset values on next processBlock
+  std::atomic<bool> mSendPresetSysEx{false};
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KR106AudioProcessor)
 };

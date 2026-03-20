@@ -1,13 +1,14 @@
 name: Build Linux
 
 on:
+  workflow_dispatch:
   push:
     tags-ignore: ['v*']
   pull_request:
     branches: [main]
 
 jobs:
-  build:
+  build-x86_64:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +34,39 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: KR106-linux
+          name: KR106-linux-x86_64
+          path: |
+            build/KR106_artefacts/**/VST3/
+            build/KR106_artefacts/**/LV2/
+            build/KR106_artefacts/**/Standalone/
+
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install JUCE dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libfreetype-dev \
+            libwebkit2gtk-4.1-dev \
+            mesa-common-dev libgl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --config Debug
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KR106-linux-arm64
           path: |
             build/KR106_artefacts/**/VST3/
             build/KR106_artefacts/**/LV2/

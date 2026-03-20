@@ -5,7 +5,7 @@
 #include "PluginProcessor.h"
 
 // Small text display showing the current preset name.
-// Drag up/down to scroll through presets.
+// Drag up/down to scroll through presets. Right-click for preset management.
 class KR106PresetDisplay : public juce::Component
 {
 public:
@@ -29,8 +29,14 @@ public:
         if (!mProcessor) return;
 
         // Get current preset name
-        int idx = mProcessor->getCurrentProgram();
-        juce::String name = mProcessor->getProgramName(idx).substring(0, 18);
+        juce::String name;
+        if (mProcessor->mInitialDefault)
+            name = "Default";
+        else
+        {
+            int idx = mProcessor->getCurrentProgram();
+            name = mProcessor->getProgramName(idx).substring(0, 18);
+        }
 
         // Draw preset name left-aligned in green (Segment14 font)
         // Use drawSingleLineText at a fixed baseline to bypass JUCE font metrics
@@ -41,7 +47,14 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (e.mods.isPopupMenu())
+        {
+            showContextMenu();
+            return;
+        }
         mDragAccum = 0.f;
+        setMouseCursor(juce::MouseCursor::NoCursor);
+        e.source.enableUnboundedMouseMovement(true);
     }
 
     void mouseDrag(const juce::MouseEvent& e) override
@@ -66,9 +79,13 @@ public:
         }
     }
 
-    void mouseUp(const juce::MouseEvent&) override
+    void mouseUp(const juce::MouseEvent& e) override
     {
         mDragRemainder = 0.f;
+        setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+        e.source.enableUnboundedMouseMovement(false);
+        auto screenPos = localPointToGlobal(juce::Point<int>(getWidth() / 2, getHeight() / 2));
+        juce::Desktop::getInstance().getMainMouseSource().setScreenPosition(screenPos.toFloat());
     }
 
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
@@ -91,8 +108,128 @@ private:
         repaint();
     }
 
+    void showContextMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Overwrite Patch...", mProcessor->isCurrentPresetDirty());
+        menu.addSeparator();
+        menu.addItem(3, "Copy Patch");
+        menu.addItem(4, "Paste Patch", mHasClipboard);
+        menu.addItem(5, "Clear Patch");
+        menu.addSeparator();
+        menu.addItem(6, "Load Patch Bank...");
+      #if JUCE_MAC
+        menu.addItem(7, "Reveal in Finder");
+      #elif JUCE_WINDOWS
+        menu.addItem(7, "Show in File Explorer");
+      #else
+        menu.addItem(7, "Show in File Manager");
+      #endif
+
+        juce::Component::SafePointer<KR106PresetDisplay> safeThis(this);
+        menu.showMenuAsync(juce::PopupMenu::Options(),
+            [safeThis](int result)
+            {
+                if (safeThis == nullptr) return;
+                switch (result)
+                {
+                    case 1: safeThis->showSaveDialog(); break;
+                    case 3: safeThis->copyPreset(); break;
+                    case 4: safeThis->pastePreset(); break;
+                    case 5: safeThis->clearPreset(); break;
+                    case 6: safeThis->showLoadDialog(); break;
+                    case 7: safeThis->revealPresetFile(); break;
+                }
+            });
+    }
+
+    void showSaveDialog()
+    {
+        int idx = mProcessor->getCurrentProgram();
+        auto preset = mProcessor->getPreset(idx);
+
+        auto* alert = new juce::AlertWindow("Save Preset", "", juce::MessageBoxIconType::NoIcon);
+        alert->addTextEditor("name", preset.name, "Preset name:");
+        alert->addButton("Save", 1);
+        alert->addButton("Cancel", 0);
+
+        juce::Component::SafePointer<KR106PresetDisplay> safeThis(this);
+        alert->enterModalState(true, juce::ModalCallbackFunction::create(
+            [safeThis, alert](int result)
+            {
+                if (result == 1 && safeThis != nullptr)
+                {
+                    juce::String name = alert->getTextEditorContents("name").trim();
+                    if (name.isNotEmpty())
+                    {
+                        safeThis->mProcessor->saveCurrentPresetToCSV(name);
+                        safeThis->repaint();
+                    }
+                }
+                delete alert;
+            }), false);
+    }
+
+    void copyPreset()
+    {
+        mClipboard = mProcessor->getPreset(mProcessor->getCurrentProgram());
+        mHasClipboard = true;
+    }
+
+    void pastePreset()
+    {
+        if (!mHasClipboard) return;
+        mProcessor->pastePreset(mClipboard);
+        repaint();
+    }
+
+    void clearPreset()
+    {
+        mProcessor->clearCurrentPreset();
+        repaint();
+    }
+
+    void showLoadDialog()
+    {
+        mFileChooser = std::make_unique<juce::FileChooser>(
+            "Load Preset CSV",
+            KR106PresetManager::getDefaultCSVPath().getParentDirectory(),
+            "*.csv");
+
+        auto flags = juce::FileBrowserComponent::openMode |
+                     juce::FileBrowserComponent::canSelectFiles;
+
+        juce::Component::SafePointer<KR106PresetDisplay> safeThis(this);
+        mFileChooser->launchAsync(flags, [safeThis](const juce::FileChooser& fc)
+        {
+            if (safeThis == nullptr) return;
+            auto result = fc.getResult();
+            if (result.existsAsFile())
+            {
+                safeThis->mProcessor->reloadPresetsFromFile(result);
+                safeThis->repaint();
+            }
+        });
+    }
+
+    void revealPresetFile()
+    {
+        auto csvFile = KR106PresetManager::getDefaultCSVPath();
+        if (csvFile.existsAsFile())
+            csvFile.revealToUser();
+        else
+            csvFile.getParentDirectory().revealToUser();
+    }
+
     KR106AudioProcessor* mProcessor = nullptr;
     juce::Typeface::Ptr mTypeface;
     float mDragAccum = 0.f;
     float mDragRemainder = 0.f;
+
+    // Copy/paste clipboard
+    KR106Preset mClipboard;
+    bool mHasClipboard = false;
+
+    // FileChooser must outlive async callback
+    std::unique_ptr<juce::FileChooser> mFileChooser;
 };

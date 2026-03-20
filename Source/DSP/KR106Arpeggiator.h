@@ -108,9 +108,19 @@ struct Arpeggiator
     mLastNote = -1;
   }
 
-  // Full sequence length (held notes * octave range, clamped to MIDI range)
+  // Physical keyboard top note (Juno-106: 61 keys, C1–C6, MIDI 36–96).
+  // When mLimitToKeyboard is true, notes transposed above this wrap down
+  // by octaves until they fit — matching hardware behavior where the arp
+  // cannot produce notes above the physical keyboard.
+  static constexpr int kMaxArpNote = 96;
+  bool mLimitToKeyboard = true;
+
+  // Full sequence length — all slots always present (wrapped notes still play)
   int SeqLen() const
   {
+    if (mLimitToKeyboard)
+      return static_cast<int>(mHeldNotes.size()) * (mRange + 1);
+
     int count = 0;
     int octaves = mRange + 1;
     for (int oct = 0; oct < octaves; oct++)
@@ -128,7 +138,14 @@ struct Arpeggiator
       for (int n : mHeldNotes)
       {
         int note = n + oct * 12;
-        if (note > 127) continue;
+        if (mLimitToKeyboard)
+        {
+          while (note > kMaxArpNote) note -= 12;
+        }
+        else
+        {
+          if (note > 127) continue;
+        }
         if (i == idx) return note;
         i++;
       }

@@ -71,8 +71,8 @@ public:
 
   void mouseDown(const juce::MouseEvent& e) override
   {
-    if (e.mods.isPopupMenu()) return;
     mDragging = true;
+    mRightDrag = e.mods.isPopupMenu();
     mAccumVal = mParam ? mParam->getValue() : 0.f;
     mLastRawDY = 0.f;
     if (mParam) mParam->beginChangeGesture();
@@ -91,7 +91,10 @@ public:
     // Cumulative gearing: shift only affects new movement
     // Scale by display DPI so non-retina screens get the same physical throw
     float dpiScale = std::max(1.f, static_cast<float>(getTopLevelComponent()->getDesktopScaleFactor()));
-    float gearing = (e.mods.isShiftDown() ? 1270.f : 127.f) / dpiScale;
+    float gearing = 127.f;
+    if (mRightDrag) gearing *= (e.mods.isShiftDown() ? 100.f : 10.f);
+    else if (e.mods.isShiftDown()) gearing *= 10.f;
+    gearing /= dpiScale;
     mAccumVal = juce::jlimit(0.f, 1.f, mAccumVal + -increment / gearing);
     float newVal = mAccumVal;
     mParam->setValueNotifyingHost(newVal);
@@ -137,9 +140,10 @@ public:
     mEditor->setColour(juce::TextEditor::highlightColourId, juce::Colour(80, 80, 80));
     mEditor->setJustification(juce::Justification::centred);
 
-    // Pre-fill with formatted value (includes units)
+    // Pre-fill with formatted value (includes units + bracket)
     juce::String displayText = mParam->getCurrentValueAsText();
     mEditor->setText(displayText, false);
+    mEditOrigMidi = juce::roundToInt(mParam->getValue() * 127.f);
 
     // Position below slider, sized to fit text (like tooltip)
     auto srcBounds = parent->getLocalArea(getParentComponent(), getBounds());
@@ -174,8 +178,23 @@ private:
     juce::String raw = mEditor->getText().trim();
     if (raw.isEmpty()) { dismissEdit(); return; }
 
-    // Delegate to the parameter's valueFromString (set via VFS in PluginProcessor)
-    float normalized = juce::jlimit(0.f, 1.f, mParam->getValueForText(raw));
+    // Check if user edited the bracket value or the human-readable part.
+    // If bracket [N] changed from original, use it; otherwise parse the text.
+    float normalized;
+    int bStart = raw.indexOfChar('[');
+    int bEnd   = raw.indexOfChar(']');
+    if (bStart >= 0 && bEnd > bStart)
+    {
+      int midi = raw.substring(bStart + 1, bEnd).getIntValue();
+      if (midi != mEditOrigMidi)
+        normalized = juce::jlimit(0.f, 1.f, midi / 127.f);
+      else
+        normalized = juce::jlimit(0.f, 1.f, mParam->getValueForText(raw));
+    }
+    else
+    {
+      normalized = juce::jlimit(0.f, 1.f, mParam->getValueForText(raw));
+    }
     mParam->beginChangeGesture();
     mParam->setValueNotifyingHost(normalized);
     mParam->endChangeGesture();
@@ -227,7 +246,9 @@ private:
   KR106Tooltip* mTooltip = nullptr;
   juce::Image mHandleImg;
   std::unique_ptr<juce::TextEditor> mEditor;
+  int mEditOrigMidi = 0;
   float mAccumVal = 0.f;
   float mLastRawDY = 0.f;
   bool mDragging = false;
+  bool mRightDrag = false;
 };

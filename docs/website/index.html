@@ -133,10 +133,9 @@
     border-color: #3344dd;
   }
 
-  .dl-btn svg {
+  .dl-btn img {
     width: 18px;
     height: 18px;
-    fill: currentColor;
     flex-shrink: 0;
   }
 
@@ -217,6 +216,69 @@
 
   .story a:hover { color: #6677ee; }
 
+  .changelog {
+    max-width: 640px;
+    margin: 0 auto 2.5rem;
+  }
+
+  .changelog h2 {
+    font-family: 'Archivo Black', sans-serif;
+    font-style: italic;
+    font-size: 1.1rem;
+    font-weight: 400;
+    color: #e8e8e8;
+    text-align: center;
+    margin-bottom: 1.2rem;
+  }
+
+  .changelog details {
+    padding-left: 1rem;
+    margin-bottom: 0.8rem;
+  }
+
+  .changelog summary {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: #ccc;
+    list-style: none;
+    padding: 0.3rem 0;
+  }
+
+  .changelog summary::-webkit-details-marker { display: none; }
+
+  .changelog summary::before {
+    content: '\25b8 ';
+    color: #555;
+    font-size: 0.8rem;
+  }
+
+  .changelog details[open] > summary::before {
+    content: '\25be ';
+    color: #4455dd;
+  }
+
+  .changelog summary .ver {
+    color: #4455dd;
+    font-family: 'Archivo Black', sans-serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+  }
+
+  .changelog ul {
+    margin: 0.4rem 0 0.2rem 1rem;
+    padding: 0;
+    list-style: disc;
+  }
+
+  .changelog li {
+    font-size: 0.85rem;
+    color: #999;
+    line-height: 1.6;
+  }
+
   footer {
     text-align: center;
     padding: 2rem 1.5rem;
@@ -279,16 +341,16 @@
 
   <div class="downloads" id="downloads">
     <a class="dl-btn" data-os="mac" href="https://github.com/kayrockscreenprinting/ultramaster_kr106/releases/latest/download/KR106-macOS.zip">
-      <svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.34-3.14-2.58C4.22 16.92 3 13.11 4.84 10.52c.89-1.28 2.48-2.09 4.06-2.12 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83l-.07.28zM13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
       macOS
     </a>
     <a class="dl-btn" data-os="win" href="https://github.com/kayrockscreenprinting/ultramaster_kr106/releases/latest/download/KR106-Windows.zip">
-      <svg viewBox="0 0 24 24"><path d="M3 12V6.75l8-1.25V12H3zm0 .5h8v6.5l-8-1.25V12.5zM11.5 5.4l9.5-1.4v8h-9.5V5.4zm0 7.1h9.5v8l-9.5-1.4v-6.6z"/></svg>
       Windows
     </a>
     <a class="dl-btn" data-os="linux" href="https://github.com/kayrockscreenprinting/ultramaster_kr106/releases/latest/download/KR106-Linux.zip">
-      <svg viewBox="0 0 24 24"><path d="M12.5 2c-1.77 0-3.15 1.08-3.76 2.55-.85.3-1.56.85-2.06 1.57C5.84 7.4 5.54 9 5.94 10.5c-.79.73-1.3 1.76-1.3 2.91 0 1.34.67 2.52 1.69 3.23-.04.26-.06.53-.06.81 0 3.04 2.47 5.55 5.55 5.55h.36c3.04 0 5.55-2.47 5.55-5.55 0-.25-.02-.5-.06-.74 1.06-.71 1.76-1.91 1.76-3.28 0-1.14-.5-2.16-1.28-2.88.41-1.51.1-3.13-.75-4.42-.5-.73-1.22-1.29-2.08-1.59C14.65 3.08 13.27 2 12.5 2z"/></svg>
-      Linux
+      Linux x86
+    </a>
+    <a class="dl-btn" href="https://github.com/kayrockscreenprinting/ultramaster_kr106/releases/latest/download/KR106-Linux-arm64.zip">
+      Linux arm64
     </a>
   <script>
     (function() {
@@ -301,7 +363,7 @@
     })();
   </script>
     <a class="dl-btn" href="https://github.com/kayrockscreenprinting/ultramaster_kr106">
-      <svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z"/></svg>
+      <img src="https://cdn.simpleicons.org/github/white" height="20">
       Source Code (GPL)
     </a>
   </div>
@@ -361,6 +423,126 @@
   <div class="story">
     <h2 style="text-align: center;">Documentation</h2>
     <p style="text-align: center;"><a href="midi_mapping.html">MIDI Mapping Reference</a> — Standard CC and Roland SysEx control assignments.</p>
+  </div>
+
+  <div class="changelog">
+    <h2>Changelog</h2>
+
+    <details open>
+      <summary><span class="ver">2.2.1</span> CSV preset bank, MIDI fixes, Default patch</summary>
+      <ul>
+        <li>Editable CSV patch bank with copy/paste, load/save, and bank file persistence</li>
+        <li>Global settings persistence (zoom, voice count, velocity, arp limit)</li>
+        <li>Fix double-triggered notes from UI keyboard MIDI echo loop</li>
+        <li>Fix stuck notes on hold release (release all voices matching a note)</li>
+        <li>Clean voice allocation on DAW suspend/resume</li>
+        <li>Show "Default" on fresh spawn; scroll to enter patch bank</li>
+        <li>SysEx output on preset change and individual knob tweaks</li>
+        <li>Slider fine control and text editor with bracket notation</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.2.0</span>Clock-domain BBD chorus, Configurable number of voices</summary>
+      <ul>
+        <li>Clock-domain VCO modulation for BBD chorus (replaces linear delay)</li>
+        <li>4-pole cascaded TPT pre/post filters from Juno-6 schematic RC values</li>
+        <li>Configurable 6/8/10 voices via right-click menu, persisted per instance</li>
+        <li>Fix stuck voices when switching unison to poly</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.9</span> CLAP and LV2 support</summary>
+      <ul>
+        <li>Add CLAP and LV2 plugin format support</li>
+        <li>Deprecation fixes for newer toolchains</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.8</span> MIDI CC/SysEx receive, master volume</summary>
+      <ul>
+        <li>Receive standard MIDI CC and Roland Juno SysEx for all parameters</li>
+        <li>Master volume control placed pre-chorus in signal chain</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.7</span>Added Preset Display</summary>
+      <ul>
+        <li>Preset name display with drag-to-scroll and mouse wheel</li>
+        <li>Arrow key and Page Up/Down preset navigation</li>
+        <li>Custom 14-segment LED font</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.6</span> Added UI Scaling</summary>
+      <ul>
+        <li>Mono mode: legato when keys overlap (no envelope retrigger)</li>
+        <li>VCF KBD tracking follows portamento glide instead of snapping</li>
+        <li>DCO LFO depth: model 10K wiper-to-ground shunt on 50K linear pot</li>
+        <li>UI scale preference saved/restored in project state</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.5</span> About screen, display scaling fix</summary>
+      <ul>
+        <li>About/version screen with vector stroke font in scope display</li>
+        <li>Fix 1x display scaling</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.4</span> Scope modes, output gain staging</summary>
+      <ul>
+        <li>3 scope modes: waveform, ADSR, VCF frequency response</li>
+        <li>VCF range extended to 5 Hz &ndash; 50 kHz</li>
+        <li>Output saturation and master volume gain staging improvements</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.3</span> VCF frequency compensation, J106 resonance model</summary>
+      <ul>
+        <li>kBaseFreq calibrated from ROM data (5.0 &rarr; 5.53)</li>
+        <li>J106 transistor resonance model (2SA1015-GR PNP)</li>
+        <li>FreqCompensation: corrects 4-pole cascade droop at low Q</li>
+        <li>VCF frequency response scope with analytical transfer function</li>
+        <li>Inverted pulse polarity in J106 mode (80017A positive-first)</li>
+        <li>ADSR: apply first tick immediately on NoteOn (D7811G firmware)</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.2</span> BBD charge-well saturation, modulated bandwidth</summary>
+      <ul>
+        <li>Three-stage filter chain matching MN3009 signal path</li>
+        <li>Clock-rate-dependent BBD bandwidth filter that sweeps with LFO</li>
+        <li>Charge-well soft saturation modeling 256 BBD stages</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.1.1</span> VCF self-oscillation tuning fix</summary>
+      <ul>
+        <li>Base compensation on k (actual feedback gain) instead of res&sup2;</li>
+        <li>Fix self-oscillation pitch nearly an octave flat at low cutoff</li>
+        <li>Calibrated against tuner measurements at 220/440/880/1760 Hz</li>
+      </ul>
+    </details>
+
+    <details>
+      <summary><span class="ver">2.0.0</span> Initial JUCE release</summary>
+      <ul>
+        <li>Port from iPlug2 to JUCE framework</li>
+        <li>macOS, Windows, and Linux support</li>
+        <li>VST3, AU, and standalone formats</li>
+        <li>CI/CD with GitHub Actions</li>
+      </ul>
+    </details>
   </div>
 </main>
 </body>

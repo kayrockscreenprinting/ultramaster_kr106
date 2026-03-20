@@ -31,6 +31,8 @@ private:
     juce::OwnedArray<juce::Component> mControls;
     KR106Scope* mScope = nullptr;
     KR106Keyboard* mKeyboard = nullptr;
+    KR106ClipLED* mClipLED = nullptr;
+    KR106ClipLED* mClipLED2 = nullptr;
     KR106Tooltip mTooltip;
 
     float mUIScale = 1.f;

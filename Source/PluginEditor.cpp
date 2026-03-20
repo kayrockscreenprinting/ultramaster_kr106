@@ -60,6 +60,10 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
 
     // Performance section
     add(new KR106Knob(param(kMasterVol), smallKnob, tip, 32),  30, 118,  28, 27);
+    mClipLED = dynamic_cast<KR106ClipLED*>(
+        add(new KR106ClipLED(ledRed, 2.5f), 62, 127, 9, 9));
+    mClipLED2 = dynamic_cast<KR106ClipLED*>(
+        add(new KR106ClipLED(ledRed, 1.5f), 53, 127, 9, 9));
     add(new KR106Knob(param(kPortaRate), smallKnob, tip, 32),  66, 118,  28, 27);
     add(new KR106Switch(param(kPortaMode), switchV, 3),    92, 161,   9, 24);
 
@@ -171,7 +175,12 @@ void KR106Editor::mouseDown(const juce::MouseEvent& e)
     menu.addItem(11, "8 Voices", true, vc == 8);
     menu.addItem(12, "10 Voices", true, vc == 10);
 
+    menu.addSeparator();
+    menu.addItem(20, "Ignore MIDI Velocity", true, mProcessor.mIgnoreVelocity);
+    menu.addItem(21, "Limit Arp to Keyboard Range", true, mProcessor.mArpLimitKbd);
+
     menu.showMenuAsync({}, [this](int r) {
+        if (r == 0) return;
         // UI scale
         float s = r == 1 ? 1.f : r == 2 ? 1.5f : r == 3 ? 2.f : 0.f;
         if (s > 0.f && s != mUIScale)
@@ -190,6 +199,19 @@ void KR106Editor::mouseDown(const juce::MouseEvent& e)
             mProcessor.mVoiceCount = voices;
             mProcessor.mDSP.SetActiveVoices(voices);
         }
+        // Velocity
+        if (r == 20)
+        {
+            mProcessor.mIgnoreVelocity = !mProcessor.mIgnoreVelocity;
+            mProcessor.mDSP.mIgnoreVelocity = mProcessor.mIgnoreVelocity;
+        }
+        // Arp keyboard limit
+        if (r == 21)
+        {
+            mProcessor.mArpLimitKbd = !mProcessor.mArpLimitKbd;
+            mProcessor.mDSP.mArp.mLimitToKeyboard = mProcessor.mArpLimitKbd;
+        }
+        mProcessor.saveGlobalSettings();
     });
 }
 
@@ -261,9 +283,12 @@ void KR106Editor::timerCallback()
         }
     }
 
-    // Update scope and keyboard from processor state
+    // Update scope, keyboard, and clip LED from processor state
     mScope->updateFromProcessor();
     mKeyboard->updateFromProcessor();
+    float peak = mProcessor.mPeakLevel.exchange(0.f, std::memory_order_relaxed);
+    mClipLED->update(peak);
+    mClipLED2->update(peak);
 
     // Repaint knobs/sliders/switches at ~7.5 Hz (every 4th tick) for host
     // automation sync — they don't change during normal MIDI playback.

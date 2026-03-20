@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 
@@ -41,8 +42,8 @@ jobs:
           IDENTITY="Developer ID Application"
           codesign --force --deep --options runtime --sign "$IDENTITY" "$ARTS/AU/Ultramaster KR-106.component"
           codesign --force --deep --options runtime --sign "$IDENTITY" "$ARTS/VST3/Ultramaster KR-106.vst3"
-          codesign --force --deep --options runtime --sign "$IDENTITY" "$ARTS/LV2/Ultramaster KR-106.lv2"
           codesign --force --deep --options runtime --sign "$IDENTITY" "$ARTS/CLAP/Ultramaster KR-106.clap"
+          find "$ARTS/LV2/Ultramaster KR-106.lv2" -name '*.dylib' -exec codesign --force --options runtime --sign "$IDENTITY" {} \;
           codesign --force --deep --options runtime --sign "$IDENTITY" "$ARTS/Standalone/Ultramaster KR-106.app"
 
       - name: Notarize plugins
@@ -56,14 +57,14 @@ jobs:
           # Create a zip for notarization submission
           ditto -c -k --keepParent "$ARTS/AU/Ultramaster KR-106.component" notarize-au.zip
           ditto -c -k --keepParent "$ARTS/VST3/Ultramaster KR-106.vst3" notarize-vst3.zip
-          ditto -c -k --keepParent "$ARTS/LV2/Ultramaster KR-106.lv2" notarize-lv2.zip
           ditto -c -k --keepParent "$ARTS/CLAP/Ultramaster KR-106.clap" notarize-clap.zip
+          ditto -c -k --keepParent "$ARTS/LV2/Ultramaster KR-106.lv2" notarize-lv2.zip
           ditto -c -k --keepParent "$ARTS/Standalone/Ultramaster KR-106.app" notarize-app.zip
           # Submit each for notarization and wait
           xcrun notarytool submit notarize-au.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           xcrun notarytool submit notarize-vst3.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          xcrun notarytool submit notarize-lv2.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           xcrun notarytool submit notarize-clap.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun notarytool submit notarize-lv2.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           xcrun notarytool submit notarize-app.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           # Staple the notarization tickets
           xcrun stapler staple "$ARTS/AU/Ultramaster KR-106.component"
@@ -79,8 +80,8 @@ jobs:
           if [ -d "$ARTS/Release/VST3" ]; then ARTS="$ARTS/Release"; fi
           cp -R "$ARTS/AU/Ultramaster KR-106.component" pkg/
           cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
-          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
+          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/Standalone/Ultramaster KR-106.app" pkg/
           cat > pkg/INSTALL.txt << 'EOF'
           Ultramaster KR-106 — macOS Installation
@@ -89,8 +90,8 @@ jobs:
 
              Ultramaster KR-106.component  →  ~/Library/Audio/Plug-Ins/Components/
              Ultramaster KR-106.vst3       →  ~/Library/Audio/Plug-Ins/VST3/
-             Ultramaster KR-106.lv2       →  ~/Library/Audio/Plug-Ins/LV2/
              Ultramaster KR-106.clap       →  ~/Library/Audio/Plug-Ins/CLAP/
+             Ultramaster KR-106.lv2        →  ~/Library/Audio/Plug-Ins/LV2/
              Ultramaster KR-106.app        →  /Applications/ (or anywhere you like)
 
           The .component file is the AU (Audio Unit) plugin for Logic Pro,
@@ -125,15 +126,15 @@ jobs:
           ARTS=build/KR106_artefacts
           if [ -d "$ARTS/Release/VST3" ]; then ARTS="$ARTS/Release"; fi
           cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
-          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
+          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/Standalone/Ultramaster KR-106.exe" pkg/
           cat > pkg/INSTALL.txt << 'EOF'
           Ultramaster KR-106 — Windows Installation
 
           VST3:       Copy the "Ultramaster KR-106.vst3" folder to C:\Program Files\Common Files\VST3\
+          CLAP:       Copy "Ultramaster KR-106.clap" to C:\Program Files\Common Files\CLAP\
           LV2:        Copy the "Ultramaster KR-106.lv2" folder to C:\Program Files\Common Files\LV2\
-          CLAP:       Copy the "Ultramaster KR-106.clap" folder to C:\Program Files\Common Files\CLAP\
           Standalone: Put "Ultramaster KR-106.exe" anywhere you like.
 
           After copying, restart your DAW to scan for new plugins.
@@ -174,6 +175,7 @@ jobs:
           ARTS=build/KR106_artefacts
           if [ -d "$ARTS/Release/VST3" ]; then ARTS="$ARTS/Release"; fi
           cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
+          cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
           cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
           cp -R "$ARTS/Standalone/Ultramaster KR-106" pkg/
@@ -181,6 +183,7 @@ jobs:
           Ultramaster KR-106 — Linux Installation
 
           VST3:       Copy the "Ultramaster KR-106.vst3" folder to ~/.vst3/
+          CLAP:       Copy "Ultramaster KR-106.clap" to ~/.clap/
           LV2:        Copy the "Ultramaster KR-106.lv2" folder to ~/.lv2/
           CLAP:       Copy the "Ultramaster KR-106.clap" folder to ~/.clap/
           Standalone: Put "Ultramaster KR-106" anywhere on your PATH.
@@ -194,8 +197,59 @@ jobs:
           name: KR106-Linux
           path: KR106-Linux.zip
 
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libfreetype-dev \
+            libwebkit2gtk-4.1-dev \
+            mesa-common-dev libgl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        run: |
+          mkdir -p pkg
+          ARTS=build/KR106_artefacts
+          if [ -d "$ARTS/Release/VST3" ]; then ARTS="$ARTS/Release"; fi
+          cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
+          cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
+          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
+          cp -R "$ARTS/Standalone/Ultramaster KR-106" pkg/
+          cat > pkg/INSTALL.txt << 'EOF'
+          Ultramaster KR-106 — Linux (ARM64) Installation
+
+          For Raspberry Pi and other ARM64 Linux systems.
+
+          VST3:       Copy the "Ultramaster KR-106.vst3" folder to ~/.vst3/
+          CLAP:       Copy "Ultramaster KR-106.clap" to ~/.clap/
+          LV2:        Copy the "Ultramaster KR-106.lv2" folder to ~/.lv2/
+          Standalone: Put "Ultramaster KR-106" anywhere on your PATH.
+
+          After copying, restart your DAW to scan for new plugins.
+          EOF
+          cd pkg && zip -r ../KR106-Linux-arm64.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KR106-Linux-arm64
+          path: KR106-Linux-arm64.zip
+
   release:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux, build-linux-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -211,4 +265,5 @@ jobs:
             artifacts/KR106-macOS/KR106-macOS.zip
             artifacts/KR106-Windows/KR106-Windows.zip
             artifacts/KR106-Linux/KR106-Linux.zip
+            artifacts/KR106-Linux-arm64/KR106-Linux-arm64.zip
           generate_release_notes: true
