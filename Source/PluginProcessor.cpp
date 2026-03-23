@@ -1195,6 +1195,7 @@ void KR106AudioProcessor::loadGlobalSettings()
   mVcfOversample = ((int)vcfOS == 2) ? 2 : 4;
   mDSP.ForEachVoice([this](kr106::Voice<float>& v) {
     v.mVCF.SetOversample(mVcfOversample);
+    v.mOsc.Init(v.mSampleRate * static_cast<float>(mVcfOversample));
   });
 
   // Load MIDI learn CC map (param→CC, multiple params can share a CC)

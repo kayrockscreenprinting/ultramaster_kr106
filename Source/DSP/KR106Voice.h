@@ -462,8 +462,8 @@ public:
     (void)blockSize;
     mSampleRate = static_cast<float>(sampleRate);
     mADSR.SetSampleRate(mSampleRate);
-    mOsc.Init(mSampleRate);
     mVCF.SetSampleRate(mSampleRate);
+    mOsc.Init(mSampleRate * static_cast<float>(mVCF.mOversample));
     {
       static constexpr double kCoeffs2x[12] = {
         0.036681502163648017, 0.13654762463195794, 0.27463175937945444,
@@ -633,6 +633,9 @@ public:
       // --- Oversampled osc + VCF ---
       // Run oscillator and filter together at the oversampled rate.
       // 4th-order PolyBLEP + oversampling gives excellent alias rejection.
+      // Precompute audio taper curves (block-rate, constant across oversampled calls).
+      float subAT = Oscillators::AudioTaper(mDcoSub);
+      float noiseAT = (mDcoNoise > 0.f) ? Oscillators::AudioTaper(mDcoNoise) : 0.f;
       float signal;
       int os = mVCF.mOversample;
       float osCps = cps / static_cast<float>(os);
@@ -643,12 +646,12 @@ public:
         bool sync = false;
         float s2x[2], s4x[2];
 
-        s4x[0] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, mDcoNoise, sync), osVcfCps, res);
-        s4x[1] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, mDcoNoise, sync), osVcfCps, res);
+        s4x[0] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, subAT, noiseAT, sync), osVcfCps, res);
+        s4x[1] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, subAT, noiseAT, sync), osVcfCps, res);
         s2x[0] = mVoiceDown2.process_sample(s4x);
 
-        s4x[0] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, mDcoNoise, sync), osVcfCps, res);
-        s4x[1] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, mDcoNoise, sync), osVcfCps, res);
+        s4x[0] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, subAT, noiseAT, sync), osVcfCps, res);
+        s4x[1] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, subAT, noiseAT, sync), osVcfCps, res);
         s2x[1] = mVoiceDown2.process_sample(s4x);
 
         signal = mVoiceDown1.process_sample(s2x);
@@ -657,8 +660,8 @@ public:
       {
         bool sync = false;
         float s2x[2];
-        s2x[0] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, mDcoNoise, sync), osVcfCps, res);
-        s2x[1] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, mDcoNoise, sync), osVcfCps, res);
+        s2x[0] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, subAT, noiseAT, sync), osVcfCps, res);
+        s2x[1] = mVCF.ProcessDirect(mOsc.Process(osCps, pw, mSawOn, mPulseOn, mSubOn, subAT, noiseAT, sync), osVcfCps, res);
         signal = mVoiceDown1.process_sample(s2x);
       }
 

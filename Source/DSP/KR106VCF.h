@@ -98,6 +98,7 @@ struct VCF
   int mOversample = 4;           // 2 or 4 — runtime selectable
   uint32_t mNoiseSeed = 123456789u; // thermal noise PRNG state
   float mInputEnv = 0.f;           // peak envelope follower for noise suppression
+  float mEnvDecay = 0.999f;        // per-sample decay for mInputEnv (22ms time constant)
   float mFrqRef = 200.f / 176400.f; // normalized reference freq for resonance rolloff
   float mDiffEnv = 0.f;  // smoothed stage-0 diff envelope
   float mSampleRate = 44100.f;     // cached for SetOversample()
@@ -133,6 +134,7 @@ struct VCF
   {
     mSampleRate = sampleRate;
     mFrqRef = 200.f / (sampleRate * static_cast<float>(mOversample));
+    mEnvDecay = expf(-1.f / (0.022f * sampleRate * static_cast<float>(mOversample)));
   }
 
   void SetOversample(int factor)
@@ -140,6 +142,7 @@ struct VCF
     int prev = mOversample;
     mOversample = (factor == 2) ? 2 : 4;
     mFrqRef = 200.f / (mSampleRate * static_cast<float>(mOversample));
+    mEnvDecay = expf(-1.f / (0.022f * mSampleRate * static_cast<float>(mOversample)));
     // Don't reset filter state (mS, mDiffEnv) — preserve pitch continuity.
     // Only clear stage-2 resamplers when switching to 4x, since they were
     // idle during 2x and may contain stale data.
@@ -320,7 +323,7 @@ private:
     // still providing reliable oscillation seeding.
     mNoiseSeed = mNoiseSeed * 196314165u + 907633515u;
     float white = static_cast<float>(mNoiseSeed) / static_cast<float>(0xFFFFFFFFu) * 2.f - 1.f;
-    mInputEnv = std::max(fabsf(input), mInputEnv * 0.999f); // peak follower with ~22ms decay at 2x rate
+    mInputEnv = std::max(fabsf(input), mInputEnv * mEnvDecay);
     float stateEnergy = fabsf(mS[0]) + fabsf(mS[1]) + fabsf(mS[2]) + fabsf(mS[3]);
     float energy = std::max(mInputEnv, stateEnergy);
     float noiseLevel = 1e-2f / (1.f + energy * 1000.f);
@@ -336,7 +339,7 @@ private:
     // at higher frequencies. Exponent -0.09 empirically matched to
     // hardware through the nonlinear filter model.
     float kRatio = std::max(frq, mFrqRef) / mFrqRef;
-    k *= powf(kRatio, -0.09f);
+    k *= expf(-0.09f * logf(kRatio));
 
     // Model per-stage OTA gain compression at high resonance.
     // The IR3109's OTA stages saturate individually at high feedback

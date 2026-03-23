@@ -281,6 +281,7 @@ void KR106Editor::showSettingsMenu()
                 mProcessor.mVcfOversample = newOS;
                 mProcessor.mDSP.ForEachVoice([newOS](kr106::Voice<float>& v) {
                     v.mVCF.SetOversample(newOS);
+                    v.mOsc.Init(v.mSampleRate * static_cast<float>(newOS));
                 });
             }
             if (r == 40)

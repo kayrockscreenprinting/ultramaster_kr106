@@ -66,6 +66,7 @@ struct Oscillators {
   float mSubLPState = 0.f;   // sub oscillator passive LP state
   float mNoiseLPState = 0.f; // noise spectral tilt LP state (TPT integrator)
   float mNoiseLPG = 0.f;    // TPT coefficient for noise LP (set by Init)
+  float mSwitchRamp = kSwitchRamp; // rate-corrected waveform switch ramp (set by Init)
 
   // Pulse duty cycle: J6 vs J106
   //
@@ -131,6 +132,8 @@ struct Oscillators {
   void Init(float sampleRate) {
     float fc = std::min(kNoiseLPHz, sampleRate * 0.45f);
     mNoiseLPG = tanf(static_cast<float>(M_PI) * fc / sampleRate);
+    // ~1.45ms time constant (matches original 1/64 at 44.1 kHz)
+    mSwitchRamp = 1.f - expf(-1.f / (0.00145f * sampleRate));
     Reset();
   }
 
@@ -146,9 +149,16 @@ struct Oscillators {
   // cps: frequency in cycles per sample (freqHz / sampleRate)
   // pulseWidth: pulse width [0.52, 0.98] (caller scales from knob/LFO)
   // sawOn, pulseOn, subOn: waveform enable switches
-  // subLevel: sub oscillator mix level [0, 1]
-  // noiseAmp: noise mix level [0, 1]
+  // subLevel: sub oscillator mix gain (pre-tapered via AudioTaper)
+  // noiseAmp: noise mix gain (pre-tapered via AudioTaper, 0 = off)
   // sync: set true on phase wraparound (for scope sync output)
+  // Audio taper: 50K pot emulation (exponential curve, same for sub + noise).
+  // Call once per block at the voice level; pass the result to Process.
+  static float AudioTaper(float x) {
+    static const float kScale = 1.f / (std::exp(3.f) - 1.f);
+    return (std::exp(3.f * x) - 1.f) * kScale;
+  }
+
   float Process(float cps, float pulseWidth, bool sawOn, bool pulseOn, bool subOn, float subLevel,
                 float noiseAmp, bool &sync) {
 
@@ -202,9 +212,9 @@ struct Oscillators {
 
     // --- Oscillator mixing ---
     // Pop-free crossfade when waveform switches change mid-note.
-    mSawGain += ((sawOn ? 1.f : 0.f) - mSawGain) * kSwitchRamp;
-    mPulseGain += ((pulseOn ? 1.f : 0.f) - mPulseGain) * kSwitchRamp;
-    mSubGain += ((subOn ? 1.f : 0.f) - mSubGain) * kSwitchRamp;
+    mSawGain += ((sawOn ? 1.f : 0.f) - mSawGain) * mSwitchRamp;
+    mPulseGain += ((pulseOn ? 1.f : 0.f) - mPulseGain) * mSwitchRamp;
+    mSubGain += ((subOn ? 1.f : 0.f) - mSubGain) * mSwitchRamp;
 
     // Linear sum. Verified against Juno-6 hardware: square+saw measured
     // -14.0dBFS vs -13.1dBFS predicted coherent sum — only 0.9dB of
@@ -212,11 +222,8 @@ struct Oscillators {
     // (6-10dB below predicted) are phase cancellation from the shared
     // phase accumulator, not mixer saturation. The VCF input OTA
     // provides soft clipping downstream when driven harder.
-    // 50K Audio taper pot emulation (same curve as noise fader)
-    float subAT = (std::exp(3.f * subLevel) - 1.f) / (std::exp(3.f) - 1.f);
-
     float out = saw * kSawAmp * mSawGain + pulse * kPulseAmp * mPulseGain +
-                sub * kSubAmp * subAT * mSubGain;
+                sub * kSubAmp * subLevel * mSubGain;
 
     // --- Noise: 2SC945 NZ avalanche source ---
     if (noiseAmp > 0.f) {
@@ -233,9 +240,6 @@ struct Oscillators {
       float v = (white - mNoiseLPState) * mNoiseLPG / (1.f + mNoiseLPG);
       float noise = mNoiseLPState + v;
       mNoiseLPState = noise + v;
-
-      // 50K Audio taper pot emulation
-      noiseAmp = (std::exp(3.f * noiseAmp) - 1.f) / (std::exp(3.f) - 1.f);
 
       out += noise * noiseAmp;
     }
