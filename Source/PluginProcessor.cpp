@@ -534,8 +534,9 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
   for (int c = nOutputs; c < getTotalNumOutputChannels(); c++)
     buffer.clear(c, 0, nFrames);
 
-  // Record how many MIDI events came from the host, before we add our own
-  int hostMidiEventCount = midiMessages.getNumEvents();
+  // Outgoing MIDI buffer — collected separately so we don't corrupt
+  // the host's midiMessages while iterating it for note events.
+  juce::MidiBuffer midiOut;
 
   // --- Sync parameter changes from JUCE → DSP + emit MIDI CC ---
   // Skip CC emission during preset change (SysEx covers it)
@@ -557,7 +558,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           int ccVal = (i == kHpfFreq)
               ? juce::roundToInt(cur) * 32  // 0-3 → 0/32/64/96
               : juce::roundToInt(cur * 127.f);
-          midiMessages.addEvent(juce::MidiMessage::controllerEvent(1, cc,
+          midiOut.addEvent(juce::MidiMessage::controllerEvent(1, cc,
               juce::jlimit(0, 127, ccVal)), 0);
         }
 
@@ -568,7 +569,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           uint8_t val = static_cast<uint8_t>(juce::roundToInt(cur * 127.f));
           uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00,
                                static_cast<uint8_t>(sx), val, 0xF7 };
-          midiMessages.addEvent(sysex, 7, 0);
+          midiOut.addEvent(sysex, 7, 0);
         }
 
         // Switch byte 0x10: octave, pulse, saw, chorus
@@ -588,7 +589,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             if (!chorusI && !chorusII) sw1 |= 0x20; // bit5: chorus off
             if (chorusI) sw1 |= 0x40;               // bit6: level 1
             uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x10, sw1, 0xF7 };
-            midiMessages.addEvent(sysex, 7, 0);
+            midiOut.addEvent(sysex, 7, 0);
             break;
           }
         }
@@ -605,7 +606,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             int hpf = juce::roundToInt(getParamValue(kHpfFreq));
             sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
             uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x11, sw2, 0xF7 };
-            midiMessages.addEvent(sysex, 7, 0);
+            midiOut.addEvent(sysex, 7, 0);
             break;
           }
         }
@@ -630,12 +631,9 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                             std::memory_order_release);
   }
 
-  // --- Decode host MIDI (before UI queue so echoed UI events aren't double-processed) ---
-  // Only process events from the host, skip our own SysEx/CC output added above.
-  int eventIdx = 0;
+  // --- Decode host MIDI ---
   for (const auto meta : midiMessages)
   {
-    if (eventIdx++ >= hostMidiEventCount) break; // skip events we added
     auto msg = meta.getMessage();
 
     if (msg.isNoteOn())
@@ -771,7 +769,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       mDSP.ControlChange(evt.data1, evt.data2 / 127.f);
     }
     // Echo to MIDI output
-    midiMessages.addEvent(juce::MidiMessage(evt.status, evt.data1, evt.data2), 0);
+    midiOut.addEvent(juce::MidiMessage(evt.status, evt.data1, evt.data2), 0);
     mUIMidiTail.store((tail + 1) % kUIMidiQueueSize, std::memory_order_release);
   }
 
@@ -839,7 +837,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       uint8_t val = static_cast<uint8_t>(juce::roundToInt(getParamValue(param) * 127.f));
       uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00,
                            static_cast<uint8_t>(cc), val, 0xF7 };
-      midiMessages.addEvent(sysex, 7, 0);
+      midiOut.addEvent(sysex, 7, 0);
     }
 
     // Switches 1 (ctrl 0x10): octave, pulse, saw, chorus
@@ -856,7 +854,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       if (!chorusI && !chorusII) sw1 |= 0x20; // bit5: chorus off
       if (chorusI) sw1 |= 0x40;               // bit6: level 1
       uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x10, sw1, 0xF7 };
-      midiMessages.addEvent(sysex, 7, 0);
+      midiOut.addEvent(sysex, 7, 0);
     }
 
     // Switches 2 (ctrl 0x11): PWM mode, VCF polarity, VCA mode, HPF
@@ -869,9 +867,12 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       int hpf = juce::roundToInt(getParamValue(kHpfFreq));
       sw2 |= static_cast<uint8_t>((3 - hpf) << 3); // 00=3, 01=2, 10=1, 11=0
       uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x11, sw2, 0xF7 };
-      midiMessages.addEvent(sysex, 7, 0);
+      midiOut.addEvent(sysex, 7, 0);
     }
   }
+
+  // --- Merge outgoing MIDI into the host buffer ---
+  midiMessages.addEvents(midiOut, 0, nFrames, 0);
 }
 
 void KR106AudioProcessor::parameterChanged(int paramIdx, float newValue)
