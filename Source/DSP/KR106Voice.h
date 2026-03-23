@@ -423,7 +423,8 @@ public:
     if (!mADSR.mJ6Mode)
     {
       mFwEnvNext = mADSR.mEnvNext;
-      mFwEnvSmooth = mADSR.mEnvNext; // snap — no ramp from zero
+      // Don't snap mFwEnvSmooth — let the 1ms RC filter smooth the onset,
+      // matching the real DAC output stage. Snapping causes clicks at attack=0.
 
       // Compute initial VCF DAC with the post-attack envelope so the
       // filter cutoff starts at the correct frequency on the first sample.

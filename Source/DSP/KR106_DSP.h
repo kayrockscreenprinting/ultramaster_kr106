@@ -639,6 +639,17 @@ public:
     ForEachVoice([semi](kr106::Voice<T>& v) { v.mOctTranspose = semi; });
   }
 
+  void AllNotesOff()
+  {
+    mArp.Reset();
+    mKeysDown.reset();
+    mHeldNotes.reset();
+    ForEachVoice([](kr106::Voice<T>& v) { v.Release(); });
+    std::fill(std::begin(mVoiceNote), std::end(mVoiceNote), -1);
+    mUnisonNote = -1;
+    mUnisonStack.clear();
+  }
+
   void PowerOff()
   {
     mArp.Reset();

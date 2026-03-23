@@ -674,7 +674,12 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       // Hardcoded mappings: sustain pedal, mod wheel, and CC→param table.
       // Skip the hardcoded map if the target param has a user MIDI learn assignment
       // (the user assignment replaces the default for that param).
-      if (cc == 64) // sustain pedal → toggle Hold
+      if (cc == 120 || cc == 123) // All Sound Off / All Notes Off
+      {
+        mDSP.AllNotesOff();
+        mKeyboardHeld.reset();
+      }
+      else if (cc == 64) // sustain pedal → toggle Hold
       {
         bool pedalDown = msg.getControllerValue() >= 64;
         mParams[kHold]->setValueNotifyingHost(pedalDown ? 1.0f : 0.0f);
