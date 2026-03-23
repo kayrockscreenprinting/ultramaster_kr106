@@ -42,19 +42,24 @@ jobs:
 
   build-arm64:
     runs-on: ubuntu-24.04-arm
+    container: debian:bullseye
     steps:
+      - name: Install system tools
+        run: |
+          apt-get update
+          apt-get install -y git cmake g++ pkg-config ca-certificates
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Install JUCE dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get install -y \
             libasound2-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-            libfreetype-dev \
-            libwebkit2gtk-4.1-dev \
+            libfreetype6-dev \
+            libwebkit2gtk-4.0-dev \
             mesa-common-dev libgl-dev
 
       - name: Configure

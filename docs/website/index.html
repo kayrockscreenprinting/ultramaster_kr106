@@ -372,31 +372,35 @@
   <div class="features">
     <div class="feature">
       <h3>1984 Mode</h3>
-      <p>All parameters calibrated from firmware analysis and factory schematics</p>
+      <p>ROM-accurate D7811G envelope, VCF frequency from firmware disassembly, 4-position switched HPF. All parameters calibrated from firmware analysis and factory schematics.</p>
     </div>
     <div class="feature">
       <h3>1982 Mode</h3>
-      <p>Analog CV path modeled from circuit analysis and hardware measurements</p>
+      <p>Analog RC envelopes, continuous HPF sweep calibrated from 11 hardware measurements, LFO rate from circuit model. Analog CV path modeled from circuit analysis and real hardware.</p>
     </div>
     <div class="feature">
-      <h3>6-Voice Poly</h3>
+      <h3>6/8/10 Voice Poly</h3>
       <p>Per-voice DCO, VCF, VCA, and ADSR envelope. Shared LFO, HPF, chorus, and arpeggiator. Mono, Poly I, and Poly II key modes with portamento.</p>
     </div>
     <div class="feature">
       <h3>128 Factory Presets</h3>
-      <p>All original patches decoded from factory SYSEX data, no hand tweaking, so if something doesn't sound right, we will fix the model, not the patch.</p>
+      <p>All original patches decoded from factory SysEx data, no hand tweaking. If something doesn't sound right, we fix the model, not the patch.</p>
     </div>
     <div class="feature">
       <h3>IR3109 VCF</h3>
-      <p>4-pole TPT OTA cascade with expo converter saturation and resonance self-oscillation. 2x oversampled.</p>
+      <p>4-pole TPT OTA cascade with per-stage tanh saturation, Newton-Raphson nonlinear solving, 2x/4x oversampling, and adaptive thermal noise on the resonance feedback path.</p>
     </div>
     <div class="feature">
       <h3>MN3009 BBD Chorus</h3>
-      <p>Bucket-brigade delay modeled with Hermite interpolation, charge-well saturation, and modulated bandwidth filter.</p>
+      <p>Dual BBD delay lines with antiphase triangle LFO, 4-pole analog reconstruction filters, bucket-brigade companding nonlinearity, and clock-tracked Nyquist filtering.</p>
     </div>
     <div class="feature">
-      <h3>Analog Variance</h3>
-      <p>Per-voice component tolerances model the subtle differences in pitch, envelope timing, VCA gain, and pulse width that give analog polysynths their character.</p>
+      <h3>Component Variance</h3>
+      <p>Per-voice component tolerances model the subtle differences in pitch, filter cutoff, envelope timing, VCA gain, and pulse width. Editable with Robot/Human/Out of Tune presets.</p>
+    </div>
+    <div class="feature">
+      <h3>MIDI Learn</h3>
+      <p>Right-click any slider or knob to assign a MIDI CC. Multiple parameters can share a CC. Full SysEx send/receive compatible with real Juno-106 hardware.</p>
     </div>
   </div>
 
@@ -431,6 +435,18 @@
     <h2>Changelog</h2>
 
     <details open>
+      <summary><span class="ver">2.3.2</span> Bug fixes, arm64 glibc compatibility</summary>
+      <ul>
+        <li>Fix dropped MIDI notes when CC messages flood processBlock (Ableton + external controllers)</li>
+        <li>Fix J106 attack click at slider position 0 (let DAC RC filter smooth the onset)</li>
+        <li>Add All Notes Off (CC 120/123) to prevent stuck notes on controller disconnect</li>
+        <li>Re-enable DC blocking in J106 HPF modes 0 and 1</li>
+        <li>Build arm64 Linux in Debian Bullseye container (glibc 2.31) for Zynthian/Pi compatibility</li>
+        <li>Component variance section in user's guide</li>
+      </ul>
+    </details>
+
+    <details>
       <summary><span class="ver">2.3.1</span> MIDI learn, 1982 HPF, DSP calibration</summary>
       <ul>
         <li>MIDI learn: right-click any slider or knob to assign a CC, persisted to JSON</li>
