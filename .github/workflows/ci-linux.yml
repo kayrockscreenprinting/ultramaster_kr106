@@ -22,7 +22,7 @@ jobs:
             pkg-config \
             libasound2-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-            libfreetype-dev \
+            libfreetype6-dev \
             mesa-common-dev libgl-dev
 
       - name: Configure
@@ -58,7 +58,7 @@ jobs:
           apt-get install -y \
             libasound2-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-            libfreetype-dev \
+            libfreetype6-dev \
             mesa-common-dev libgl-dev
 
       - name: Configure
