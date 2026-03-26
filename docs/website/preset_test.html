@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="favicon.ico">
+<title>Ultramaster KR-106 — Preset A/B Test MIDI Files</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Oswald:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Oswald', sans-serif;
+    background: #111 url('background.png') center top / cover no-repeat fixed;
+    color: #e8e8e8;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 15, 0.82);
+    z-index: 0;
+  }
+
+  .accent-bar, main, footer { position: relative; z-index: 1; }
+
+  .accent-bar {
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, #cc0000 0%, #cc0000 70%, #2233cc 70%, #2233cc 100%);
+  }
+
+  main {
+    max-width: 960px;
+    width: 100%;
+    padding: 3rem 1.5rem;
+  }
+
+  a { color: #4455dd; text-decoration: none; }
+  a:hover { color: #6677ee; }
+
+  header {
+    text-align: center;
+    margin-bottom: 2.5rem;
+  }
+
+  h1 {
+    font-family: 'Archivo Black', sans-serif;
+    font-style: italic;
+    font-size: 2.4rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.4rem;
+  }
+
+  h1 .red { color: #cc0000; }
+  h1 .blue { color: #2233cc; }
+
+  .subtitle {
+    font-size: 1.05rem;
+    color: #999;
+    font-weight: 400;
+  }
+
+  h2 {
+    font-family: 'Archivo Black', sans-serif;
+    font-style: italic;
+    font-size: 1.2rem;
+    font-weight: 400;
+    color: #e8e8e8;
+    margin: 2rem 0 0.8rem;
+  }
+
+  p, li {
+    font-size: 0.95rem;
+    color: #ccc;
+    line-height: 1.7;
+  }
+
+  ol, ul {
+    margin: 0.5rem 0 1rem 1.5rem;
+  }
+
+  .section {
+    max-width: 700px;
+    margin: 0 auto 2rem;
+  }
+
+  /* Bank table */
+  .bank-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 2rem;
+  }
+
+  .bank-table th, .bank-table td {
+    padding: 0.5rem 0.8rem;
+    text-align: left;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #2a2a2a;
+  }
+
+  .bank-table th {
+    color: #4455dd;
+    font-family: 'Archivo Black', sans-serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .bank-table td { color: #ccc; }
+  .bank-table td a { font-weight: 500; }
+
+  /* Preset grid */
+  .preset-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 2px;
+    margin: 1rem 0 2rem;
+  }
+
+  .preset-grid a {
+    display: block;
+    padding: 0.35rem 0.2rem;
+    text-align: center;
+    font-size: 0.7rem;
+    color: #999;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    transition: background 0.1s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .preset-grid a:hover {
+    background: #2a2a2a;
+    color: #e8e8e8;
+    border-color: #4455dd;
+  }
+
+  .bank-label {
+    grid-column: 1 / -1;
+    font-family: 'Archivo Black', sans-serif;
+    font-style: italic;
+    font-size: 0.8rem;
+    color: #4455dd;
+    padding: 0.6rem 0 0.2rem;
+  }
+
+  footer {
+    text-align: center;
+    padding: 2rem 1.5rem;
+    border-top: 1px solid #222;
+    width: 100%;
+    max-width: 960px;
+    margin-top: auto;
+  }
+
+  footer a { color: #777; font-size: 0.85rem; }
+  footer a:hover { color: #ccc; }
+</style>
+</head>
+<body>
+<div class="accent-bar"></div>
+<main>
+  <header>
+    <h1><span class="red">ULTRAMASTER</span> <span class="blue">KR-106</span></h1>
+    <p class="subtitle">Preset A/B Test MIDI Files</p>
+  </header>
+
+  <div class="section">
+
+    <h2>Help us calibrate the KR-106</h2>
+    <p>We're building the most accurate Juno-106 emulation possible, and we need
+       recordings from real hardware to get there. These MIDI files program your
+       106 to each factory preset via SysEx and play a sequence of test notes.
+       You don't need the original patches in memory -- the files set every
+       parameter directly.</p>
+
+    <p>If you have a Juno-106, please record a few banks and send us the audio.
+       Even a handful of presets helps. The more units we hear from, the better
+       we can model the component variance between machines.</p>
+
+    <p style="text-align:center; margin: 1.5rem 0;">
+      <a href="https://github.com/kayrockscreenprinting/ultramaster_kr106/issues"
+         style="font-weight:600; font-size:1rem;">Submit recordings via GitHub</a>
+    </p>
+
+    <h2>How to record</h2>
+    <ol>
+      <li>Connect your Juno-106 MIDI in (USB interface or DIN cable)</li>
+      <li>Download a bank file below (8 presets each, fire and forget)</li>
+      <li>Play the MIDI file into the 106 and record the audio output</li>
+      <li>Upload the recording to a GitHub issue, or email it to us</li>
+    </ol>
+    <p>Record at 96 kHz if you can, 44.1 kHz is fine too. Line out is best
+       (no amp/speaker coloring). Include your unit's serial number if
+       you know it -- helps us track variance between machines.</p>
+
+    <h2>Restore your factory presets</h2>
+    <p>Lost your factory patches? These files also work as a preset loader.
+       Play any file into your 106 and it will set every slider and switch
+       to the factory values. The individual preset files below let you
+       audition any of the 128 patches.</p>
+
+    <h2>What each file plays</h2>
+    <ul>
+      <li>SysEx to set all parameters (no Program Change, won't overwrite your patches)</li>
+      <li>One long C4 note (hold time matches the preset's attack + 500ms sustain)</li>
+      <li>Full release tail (matches the preset's release time)</li>
+      <li>Five quick notes across the keyboard: C2, C3, C4, C5, C6</li>
+    </ul>
+  </div>
+
+  <h2>Bank Files (8 presets each)</h2>
+  <p style="color:#999; font-size:0.85rem; margin-bottom:0.5rem;">Fire and forget. Each bank plays through 8 presets in sequence.</p>
+
+  <table class="bank-table">
+    <tr><th>File</th><th>Presets</th></tr>
+    <tr><td><a href="bank_midi/bank_A1x.mid">bank_A1x.mid</a></td><td>A11 Brass &ndash; A18 Piano I</td></tr>
+    <tr><td><a href="bank_midi/bank_A2x.mid">bank_A2x.mid</a></td><td>A21 Organ I &ndash; A28 Elect. Piano II</td></tr>
+    <tr><td><a href="bank_midi/bank_A3x.mid">bank_A3x.mid</a></td><td>A31 Clock Chimes &ndash; A38 High Strings</td></tr>
+    <tr><td><a href="bank_midi/bank_A4x.mid">bank_A4x.mid</a></td><td>A41 Bass Clarinet &ndash; A48 Synth Bass I</td></tr>
+    <tr><td><a href="bank_midi/bank_A5x.mid">bank_A5x.mid</a></td><td>A51 Lead I &ndash; A58 Going Up</td></tr>
+    <tr><td><a href="bank_midi/bank_A6x.mid">bank_A6x.mid</a></td><td>A61 Piano II &ndash; A68 Synth Pad</td></tr>
+    <tr><td><a href="bank_midi/bank_A7x.mid">bank_A7x.mid</a></td><td>A71 Sweep I &ndash; A78 Wah Release</td></tr>
+    <tr><td><a href="bank_midi/bank_A8x.mid">bank_A8x.mid</a></td><td>A81 Gong &ndash; A88 Caverns</td></tr>
+    <tr><td><a href="bank_midi/bank_B1x.mid">bank_B1x.mid</a></td><td>B11 Strings &ndash; B18 Noise Sweep</td></tr>
+    <tr><td><a href="bank_midi/bank_B2x.mid">bank_B2x.mid</a></td><td>B21 Space Chimes &ndash; B28 FX Rise 2</td></tr>
+    <tr><td><a href="bank_midi/bank_B3x.mid">bank_B3x.mid</a></td><td>B31 Brass &ndash; B38 Bass Pluck</td></tr>
+    <tr><td><a href="bank_midi/bank_B4x.mid">bank_B4x.mid</a></td><td>B41 Resonant Rise &ndash; B48 Chorused Bell</td></tr>
+    <tr><td><a href="bank_midi/bank_B5x.mid">bank_B5x.mid</a></td><td>B51 Clav &ndash; B58 Blizzard</td></tr>
+    <tr><td><a href="bank_midi/bank_B6x.mid">bank_B6x.mid</a></td><td>B61 E. Piano w/ Tremolo &ndash; B68 OW Bass</td></tr>
+    <tr><td><a href="bank_midi/bank_B7x.mid">bank_B7x.mid</a></td><td>B71 Piccolo &ndash; B78 Brassy Organ</td></tr>
+    <tr><td><a href="bank_midi/bank_B8x.mid">bank_B8x.mid</a></td><td>B81 Low Dark Strings &ndash; B88 Owgan</td></tr>
+  </table>
+
+  <h2>Individual Preset Files</h2>
+  <p style="color:#999; font-size:0.85rem; margin-bottom:0.5rem;">Click any preset to download its MIDI file.</p>
+
+  <div class="preset-grid">
+    <div class="bank-label">Bank A</div>
+    <a href="preset_midi/A11_Brass.mid">A11 Brass</a>
+    <a href="preset_midi/A12_Brass_Swell.mid">A12 Brass Swell</a>
+    <a href="preset_midi/A13_Trumpet.mid">A13 Trumpet</a>
+    <a href="preset_midi/A14_Flutes.mid">A14 Flutes</a>
+    <a href="preset_midi/A15_Moving_Strings.mid">A15 Mov Strings</a>
+    <a href="preset_midi/A16_Brass__Strings.mid">A16 Brass&amp;Str</a>
+    <a href="preset_midi/A17_Choir.mid">A17 Choir</a>
+    <a href="preset_midi/A18_Piano_I.mid">A18 Piano I</a>
+
+    <a href="preset_midi/A21_Organ_I.mid">A21 Organ I</a>
+    <a href="preset_midi/A22_Organ_II.mid">A22 Organ II</a>
+    <a href="preset_midi/A23_Combo_Organ.mid">A23 Combo Organ</a>
+    <a href="preset_midi/A24_Calliope.mid">A24 Calliope</a>
+    <a href="preset_midi/A25_Donald_Pluck.mid">A25 Donald Pluck</a>
+    <a href="preset_midi/A26_Celeste.mid">A26 Celeste</a>
+    <a href="preset_midi/A27_Elect_Piano_I.mid">A27 E.Piano I</a>
+    <a href="preset_midi/A28_Elect_Piano_II.mid">A28 E.Piano II</a>
+
+    <a href="preset_midi/A31_Clock_Chimes.mid">A31 Clock Chimes</a>
+    <a href="preset_midi/A32_Steel_Drums.mid">A32 Steel Drums</a>
+    <a href="preset_midi/A33_Xylophone.mid">A33 Xylophone</a>
+    <a href="preset_midi/A34_Brass_III.mid">A34 Brass III</a>
+    <a href="preset_midi/A35_Fanfare.mid">A35 Fanfare</a>
+    <a href="preset_midi/A36_Strings_III.mid">A36 Strings III</a>
+    <a href="preset_midi/A37_Pizzicato.mid">A37 Pizzicato</a>
+    <a href="preset_midi/A38_High_Strings.mid">A38 High Strings</a>
+
+    <a href="preset_midi/A41_Bass_Clarinet.mid">A41 Bass Clari</a>
+    <a href="preset_midi/A42_English_Horn.mid">A42 Eng Horn</a>
+    <a href="preset_midi/A43_Brass_Ensemble.mid">A43 Brass Ens</a>
+    <a href="preset_midi/A44_Guitar.mid">A44 Guitar</a>
+    <a href="preset_midi/A45_Koto.mid">A45 Koto</a>
+    <a href="preset_midi/A46_Dark_Pluck.mid">A46 Dark Pluck</a>
+    <a href="preset_midi/A47_Funky_I.mid">A47 Funky I</a>
+    <a href="preset_midi/A48_Synth_Bass_I.mid">A48 Synth Bass I</a>
+
+    <a href="preset_midi/A51_Lead_I.mid">A51 Lead I</a>
+    <a href="preset_midi/A52_Lead_II.mid">A52 Lead II</a>
+    <a href="preset_midi/A53_Lead_III.mid">A53 Lead III</a>
+    <a href="preset_midi/A54_Funky_II.mid">A54 Funky II</a>
+    <a href="preset_midi/A55_Synth_Bass_II.mid">A55 Synth Bass II</a>
+    <a href="preset_midi/A56_Funky_III.mid">A56 Funky III</a>
+    <a href="preset_midi/A57_Thud_Wah.mid">A57 Thud Wah</a>
+    <a href="preset_midi/A58_Going_Up.mid">A58 Going Up</a>
+
+    <a href="preset_midi/A61_Piano_II.mid">A61 Piano II</a>
+    <a href="preset_midi/A62_Clav.mid">A62 Clav</a>
+    <a href="preset_midi/A63_Frontier_Organ.mid">A63 Front Organ</a>
+    <a href="preset_midi/A64_Snare_Drum.mid">A64 Snare Drum</a>
+    <a href="preset_midi/A65_Tom_Toms.mid">A65 Tom Toms</a>
+    <a href="preset_midi/A66_Timpani.mid">A66 Timpani</a>
+    <a href="preset_midi/A67_Shaker.mid">A67 Shaker</a>
+    <a href="preset_midi/A68_Synth_Pad.mid">A68 Synth Pad</a>
+
+    <a href="preset_midi/A71_Sweep_I.mid">A71 Sweep I</a>
+    <a href="preset_midi/A72_Pluck_Sweep.mid">A72 Pluck Sweep</a>
+    <a href="preset_midi/A73_Repeater.mid">A73 Repeater</a>
+    <a href="preset_midi/A74_Sweep_II.mid">A74 Sweep II</a>
+    <a href="preset_midi/A75_Pluck_Bell.mid">A75 Pluck Bell</a>
+    <a href="preset_midi/A76_Dark_Synth_Piano.mid">A76 Dark S.Piano</a>
+    <a href="preset_midi/A77_Sustainer.mid">A77 Sustainer</a>
+    <a href="preset_midi/A78_Wah_Release.mid">A78 Wah Release</a>
+
+    <a href="preset_midi/A81_Gong.mid">A81 Gong</a>
+    <a href="preset_midi/A82_Resonance_Funk.mid">A82 Res Funk</a>
+    <a href="preset_midi/A83_Drum_Booms.mid">A83 Drum Booms</a>
+    <a href="preset_midi/A84_Dust_Storm.mid">A84 Dust Storm</a>
+    <a href="preset_midi/A85_Rocket_Men.mid">A85 Rocket Men</a>
+    <a href="preset_midi/A86_Hand_Claps.mid">A86 Hand Claps</a>
+    <a href="preset_midi/A87_FX_Sweep.mid">A87 FX Sweep</a>
+    <a href="preset_midi/A88_Caverns.mid">A88 Caverns</a>
+
+    <div class="bank-label">Bank B</div>
+    <a href="preset_midi/B11_Strings.mid">B11 Strings</a>
+    <a href="preset_midi/B12_Violin.mid">B12 Violin</a>
+    <a href="preset_midi/B13_Chorus_Vibes.mid">B13 Chorus Vibes</a>
+    <a href="preset_midi/B14_Organ_I.mid">B14 Organ I</a>
+    <a href="preset_midi/B15_Harpsichord_I.mid">B15 Harpsichord</a>
+    <a href="preset_midi/B16_Recorder.mid">B16 Recorder</a>
+    <a href="preset_midi/B17_Perc_Pluck.mid">B17 Perc Pluck</a>
+    <a href="preset_midi/B18_Noise_Sweep.mid">B18 Noise Sweep</a>
+
+    <a href="preset_midi/B21_Space_Chimes.mid">B21 Space Chimes</a>
+    <a href="preset_midi/B22_Nylon_Guitar.mid">B22 Nylon Guitar</a>
+    <a href="preset_midi/B23_Orchestral_Pad.mid">B23 Orch Pad</a>
+    <a href="preset_midi/B24_Bright_Pluck.mid">B24 Bright Pluck</a>
+    <a href="preset_midi/B25_Organ_Bell.mid">B25 Organ Bell</a>
+    <a href="preset_midi/B26_Accordion.mid">B26 Accordion</a>
+    <a href="preset_midi/B27_FX_Rise_1.mid">B27 FX Rise 1</a>
+    <a href="preset_midi/B28_FX_Rise_2.mid">B28 FX Rise 2</a>
+
+    <a href="preset_midi/B31_Brass.mid">B31 Brass</a>
+    <a href="preset_midi/B32_Helicopter.mid">B32 Helicopter</a>
+    <a href="preset_midi/B33_Lute.mid">B33 Lute</a>
+    <a href="preset_midi/B34_Chorus_Funk.mid">B34 Chorus Funk</a>
+    <a href="preset_midi/B35_Tomita.mid">B35 Tomita</a>
+    <a href="preset_midi/B36_FX_Sweep_1.mid">B36 FX Sweep 1</a>
+    <a href="preset_midi/B37_Sharp_Reed.mid">B37 Sharp Reed</a>
+    <a href="preset_midi/B38_Bass_Pluck.mid">B38 Bass Pluck</a>
+
+    <a href="preset_midi/B41_Resonant_Rise.mid">B41 Res Rise</a>
+    <a href="preset_midi/B42_Harpsichord_2.mid">B42 Harpsichord 2</a>
+    <a href="preset_midi/B43_Dark_Ensemble.mid">B43 Dark Ens</a>
+    <a href="preset_midi/B44_Contact_Wah.mid">B44 Contact Wah</a>
+    <a href="preset_midi/B45_Noise_Sweep_2.mid">B45 Noise Swp 2</a>
+    <a href="preset_midi/B46_Glassy_Wah.mid">B46 Glassy Wah</a>
+    <a href="preset_midi/B47_Phase_Ensemble.mid">B47 Phase Ens</a>
+    <a href="preset_midi/B48_Chorused_Bell.mid">B48 Chorus Bell</a>
+
+    <a href="preset_midi/B51_Clav.mid">B51 Clav</a>
+    <a href="preset_midi/B52_Organ_2.mid">B52 Organ 2</a>
+    <a href="preset_midi/B53_Bassoon.mid">B53 Bassoon</a>
+    <a href="preset_midi/B54_Auto_Release_Noise_Sweep.mid">B54 Auto Rel NS</a>
+    <a href="preset_midi/B55_Brass_Ensemble.mid">B55 Brass Ens</a>
+    <a href="preset_midi/B56_Ethereal.mid">B56 Ethereal</a>
+    <a href="preset_midi/B57_Chorus_Bell_2.mid">B57 Chorus Bell 2</a>
+    <a href="preset_midi/B58_Blizzard.mid">B58 Blizzard</a>
+
+    <a href="preset_midi/B61_E_Piano_with_Tremolo.mid">B61 E.Piano Trem</a>
+    <a href="preset_midi/B62_Clarinet.mid">B62 Clarinet</a>
+    <a href="preset_midi/B63_Thunder.mid">B63 Thunder</a>
+    <a href="preset_midi/B64_Reedy_Organ.mid">B64 Reedy Organ</a>
+    <a href="preset_midi/B65_Flute__Horn.mid">B65 Flute&amp;Horn</a>
+    <a href="preset_midi/B66_Toy_Rhodes.mid">B66 Toy Rhodes</a>
+    <a href="preset_midi/B67_Surfs_Up.mid">B67 Surfs Up</a>
+    <a href="preset_midi/B68_OW_Bass.mid">B68 OW Bass</a>
+
+    <a href="preset_midi/B71_Piccolo.mid">B71 Piccolo</a>
+    <a href="preset_midi/B72_Melodic_Taps.mid">B72 Melodic Taps</a>
+    <a href="preset_midi/B73_Meow_Bass.mid">B73 Meow Bass</a>
+    <a href="preset_midi/B74_Violin_high.mid">B74 Violin High</a>
+    <a href="preset_midi/B75_High_Bells.mid">B75 High Bells</a>
+    <a href="preset_midi/B76_Rolling_Wah.mid">B76 Rolling Wah</a>
+    <a href="preset_midi/B77_Ping_Bell.mid">B77 Ping Bell</a>
+    <a href="preset_midi/B78_Brassy_Organ.mid">B78 Brassy Organ</a>
+
+    <a href="preset_midi/B81_Low_Dark_Strings.mid">B81 Low Dk Str</a>
+    <a href="preset_midi/B82_Piccolo_Trumpet.mid">B82 Picc Trumpet</a>
+    <a href="preset_midi/B83_Cello.mid">B83 Cello</a>
+    <a href="preset_midi/B84_High_Strings.mid">B84 High Strings</a>
+    <a href="preset_midi/B85_Rocket_Men.mid">B85 Rocket Men</a>
+    <a href="preset_midi/B86_Forbidden_Planet.mid">B86 Forbid Planet</a>
+    <a href="preset_midi/B87_Froggy.mid">B87 Froggy</a>
+    <a href="preset_midi/B88_Owgan.mid">B88 Owgan</a>
+  </div>
+
+  <div class="section">
+    <h2>VCF Calibration Test</h2>
+    <p>This file sweeps white noise through the filter at 9 cutoff frequencies
+       (C1-C9) and 11 resonance levels (0.0-1.0), 1 second per step.
+       99 test points, about 100 seconds total. Noise-only patch, gate mode VCA,
+       no envelope modulation. Ideal for measuring the filter's frequency response
+       and resonance behavior.</p>
+    <p style="margin-top:0.8rem;"><a href="preset_midi/filter_test.mid" style="font-weight:600;">Download filter_test.mid</a></p>
+  </div>
+
+  <div class="section">
+    <h2>Technical Notes</h2>
+    <ul>
+      <li>Standard Roland Juno-106 SysEx (F0 41 32 ...). Any 106 should respond.</li>
+      <li>No Program Change is sent -- your stored patches are not affected.</li>
+      <li>Note timing adapts to each preset's attack and release envelope settings.</li>
+      <li>Works with Juno-106 only (not Juno-6 or Juno-60, which use a different SysEx format).</li>
+    </ul>
+  </div>
+</main>
+
+<footer>
+  <a href="index.html">Back to Ultramaster KR-106</a>
+</footer>
+</body>
+</html>
