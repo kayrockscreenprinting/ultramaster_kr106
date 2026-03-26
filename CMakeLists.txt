@@ -62,6 +62,7 @@ target_sources(KR106 PRIVATE
     Source/DSP/KR106Arpeggiator.h
     Source/DSP/KR106Chorus.h
     Source/DSP/KR106LFO.h
+    Source/DSP/KR106Noise.h
     Source/DSP/KR106Oscillators.h
     Source/DSP/KR106VCF.h
     Source/DSP/KR106VcfFreqJ106.h

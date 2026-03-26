@@ -12,6 +12,7 @@
 
 #include "KR106Voice.h"
 #include "KR106LFO.h"
+#include "KR106Noise.h"
 #include "KR106VcfFreqJ6.h"
 #include "KR106Arpeggiator.h"
 #include "KR106Chorus.h"
@@ -342,27 +343,7 @@ public:
       mLFOBuffer[s] = static_cast<T>(mLFO.Process());
       mLFORawBuffer[s] = static_cast<T>(mLFO.mLastTri);
 
-      // FIXME, make higher frq redcording of Juno 6 and analyze
-      // Shared noise: 4-sample CLT white noise + TPT 1-pole LP + TPT 1-pole HP
-      float g = 0.f;
-      for (int j = 0; j < 4; j++) {
-          mNoiseSeed = mNoiseSeed * 196314165u + 907633515u;
-          g += 2.f * mNoiseSeed / static_cast<float>(0xFFFFFFFFu) - 1.f;
-      }
-      float white = g * 0.5f;
-      
-      // LPF ~15.4 kHz (C9/R65 in BA662 feedback)
-      float vLP = (white - mNoiseLPState) * mNoiseLPG / (1.f + mNoiseLPG);
-      float lp = mNoiseLPState + vLP;
-      mNoiseLPState = lp + vLP;
-      
-      // HPF ~159 Hz (C10/R70 output coupling)
-      float vHP = (lp - mNoiseHPState) * mNoiseHPG / (1.f + mNoiseHPG);
-      float hpLP = mNoiseHPState + vHP;
-      mNoiseHPState = hpLP + vHP;
-      float noise = lp - hpLP;  // HP = input - LP
-      
-      mNoiseBuffer[s] = static_cast<T>(noise);
+      mNoiseBuffer[s] = static_cast<T>(mNoise.Process());
     }
 
     mModulations[kModLFO]    = mLFOBuffer.data();
@@ -451,11 +432,7 @@ public:
     mHPF.SetMode(1);
     mChorus.Init(mSampleRate);
     mArp.SetSampleRate(mSampleRate);
-    // Shared noise source filters (from schematic)
-    mNoiseLPG = tanf(static_cast<float>(M_PI) * 15400.f / mSampleRate);  // C9/R65
-    mNoiseHPG = tanf(static_cast<float>(M_PI) * 159.f / mSampleRate);    // C10/R70
-    mNoiseLPState = 0.f;
-    mNoiseHPState = 0.f;
+    mNoise.SetSampleRate(mSampleRate);
     mLFOBuffer.resize(blockSize);
     mLFORawBuffer.resize(blockSize);
     mNoiseBuffer.resize(blockSize);
@@ -552,11 +529,7 @@ public:
   std::vector<T> mLFOBuffer;
   std::vector<T> mLFORawBuffer; // raw triangle (before onset envelope)
   std::vector<T> mNoiseBuffer;  // shared noise source (single generator for all voices)
-  uint32_t mNoiseSeed = 22222;
-  float mNoiseLPState = 0.f;
-  float mNoiseLPG = 0.f;        // TPT coefficient for noise LP (C9/R65, 15.4 kHz)
-  float mNoiseHPState = 0.f;
-  float mNoiseHPG = 0.f;        // TPT coefficient for noise HP (C10/R70, 159 Hz)
+  kr106::Noise mNoise;
   std::vector<T> mSyncBuffer;
   float mScopeSyncPhase = 0.f;
   bool mScopeSyncSub = false;

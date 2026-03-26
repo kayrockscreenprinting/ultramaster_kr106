@@ -744,7 +744,6 @@ private:
         auto& dsp = mProcessor->mDSP;
         bool j106 = (dsp.mAdsrMode != 0);
 
-        // Compute cutoff frequency (Hz) from slider — same logic as SetParam
         float slider = dsp.mSliderVcfFreq;
         float fc;
         if (j106)
@@ -755,36 +754,20 @@ private:
         else
             fc = kr106::j6_vcf_freq_from_slider(slider);
 
-        // Compute resonance k — same pipeline as VCF::ProcessSample
         float res = mProcessor->getParam(kVcfRes)->getValue();
         float k = j106 ? kr106::VCF::ResK_J106(res) : kr106::VCF::ResK_J6(res);
+        k = kr106::VCF::SoftClipK(k);
 
-        float fcSlider = fc; // slider frequency for the marker
-
-        // Frequency-dependent resonance attenuation (matches ProcessSample).
-        // In the DSP, frq and mFrqRef are both in the oversampled domain,
-        // so their ratio equals fc_hz / 200. Compute directly in Hz here.
-        float ratio = std::max(fc, 200.f) / 200.f;
-        k *= powf(ratio, -0.09f);
-
-        // Soft-clip k above 3.0
-        if (k > 3.0f)
-        {
-            float excess = k - 3.0f;
-            k = 3.0f + excess / (1.0f + excess * 0.2f);
-        }
-
-        // Clamp max k
-        k = std::min(k, 6.6f);
-
+        float fcSlider = fc;
         fc *= kr106::VCF::FreqCompensation(k);
+        float comp = kr106::VCF::InputComp(k);
 
         // Display range
         static constexpr float kMinHz = 5.f;
         static constexpr float kMaxHz = 50000.f;
         static constexpr float kMinDb = -48.f;
         static constexpr float kMaxDb = 24.f;
-        static constexpr float kDbRange = kMaxDb - kMinDb; // 72 dB
+        static constexpr float kDbRange = kMaxDb - kMinDb;
         float logMin = log10f(kMinHz);
         float logMax = log10f(kMaxHz);
         float logRange = logMax - logMin;
@@ -814,7 +797,7 @@ private:
             g.fillRect(0.f, std::round(yf), static_cast<float>(w), 1.f);
         }
 
-        // Cutoff frequency marker (fixed at slider position)
+        // Cutoff frequency marker
         if (fcSlider >= kMinHz && fcSlider <= kMaxHz)
         {
             g.setColour(mid);
@@ -823,11 +806,16 @@ private:
         }
 
         // Evaluate and draw magnitude response (normalized to 0 dB at DC)
+        // The transfer function for a 4-pole cascade with feedback k and
+        // input compensation comp is:
+        //   H(s) = comp / ((1 + s/wc)^4 + k)
+        // In normalized frequency (x = f/fc):
+        //   |H|² = comp² / ((1+x²)⁴ + 2k(1+x²)²cos(4·atan(x)) + k²)
         float k2 = k * k;
-        float dcGainInv = (1.f + k) * (1.f + k); // compensate feedback passband loss
+        float comp2 = comp * comp;
 
-        auto evalDb = [&](int px) -> float {
-            float logF = logMin + static_cast<float>(px) / (w - 1) * logRange;
+        auto evalDb = [&](float px) -> float {
+            float logF = logMin + px / (w - 1) * logRange;
             float freq = powf(10.f, logF);
             float x = freq / fc;
             float x2 = x * x;
@@ -836,31 +824,23 @@ private:
             float p8 = p4 * p4;
             float theta4 = 4.f * atanf(x);
             float denomSq = p8 + 2.f * k * p4 * cosf(theta4) + k2;
-            float magSq = dcGainInv / denomSq;
+            float magSq = comp2 / denomSq;
             float db = 10.f * log10f(std::max(magSq, 1e-12f));
             return std::clamp(db, kMinDb, kMaxDb);
         };
 
-        auto dbToY = [&](float db) -> int {
-            return static_cast<int>(std::round((1.f - (db - kMinDb) / kDbRange) * (h - 1)));
+        auto dbToY = [&](float db) -> float {
+            return (1.f - (db - kMinDb) / kDbRange) * (h - 1);
         };
 
+        juce::Path vcfPath;
+        float step = 0.5f;
+        vcfPath.startNewSubPath(0.f, dbToY(evalDb(0.f)));
+        for (float px = step; px < w; px += step)
+            vcfPath.lineTo(px, dbToY(evalDb(px)));
+
         g.setColour(bright);
-        int lastY = dbToY(evalDb(0));
-        bool lastClipped = (evalDb(0) <= kMinDb);
-        for (int px = 0; px < w; px++)
-        {
-            float db = evalDb(px);
-            bool clipped = (db <= kMinDb);
-            if (clipped && lastClipped) { lastY = dbToY(db); continue; }
-            int y = dbToY(db);
-            int y1 = std::min(lastY, y);
-            int y2 = std::max(lastY, y) + 1;
-            g.fillRect(static_cast<float>(px), static_cast<float>(y1),
-                       1.f, static_cast<float>(y2 - y1));
-            lastY = y;
-            lastClipped = clipped;
-        }
+        g.strokePath(vcfPath, juce::PathStrokeType(0.75f));
     }
 
     // ---- Frequency counter (zero-crossing measurement) ----

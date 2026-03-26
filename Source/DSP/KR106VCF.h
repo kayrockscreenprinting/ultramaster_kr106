@@ -248,6 +248,25 @@ struct VCF
       return std::max((1.96f + 1.06f * k) / (1.f + 2.16f * k), 1.f);
   }
 
+  // Soft-clip resonance above k=3.0 (OTA gain compression at high feedback).
+  static float SoftClipK(float k)
+  {
+    if (k > 3.0f)
+    {
+      float excess = k - 3.0f;
+      k = 3.0f + excess / (1.0f + excess * 0.2f);
+    }
+    return std::min(k, 6.6f);
+  }
+
+  // Input Q compensation: BA662 differential topology feeds input through
+  // R5(47K) alongside LP4 feedback on R3(100K). Higher resonance boosts
+  // the input, counteracting passband volume drop.
+  static float InputComp(float k)
+  {
+    return 1.f + k * 0.45f;
+  }
+
   static constexpr float kOTAScale = 0.35f;
 
   // Nonlinear one-pole OTA-C stage: solves y = s + g*tanh(x - y)
@@ -337,18 +356,7 @@ private:
 
     // Resonance CV: external transistor feeds BA662 OTA control current.
     float k = mJ106Res ? ResK_J106(res) : ResK_J6(res);
-
-    // Model per-stage OTA gain compression at high resonance.
-    // The IR3109's OTA stages saturate individually at high feedback
-    // levels, reducing effective loop gain. This is distinct from the
-    // BA662 feedback tanh (which limits oscillation amplitude).
-    // Soft-clip k above 3.0 to keep R=0.3-0.7 calibration intact
-    // while compressing R=0.8-1.0 to match hardware prominence.
-    if (k > 3.0f)
-    {
-      float excess = k - 3.0f;
-      k = 3.0f + excess / (1.0f + excess * 0.2f);
-    }
+    k = SoftClipK(k);
 
     // Clamp frq for the bilinear transform — prevents tan() from
     // blowing up near Nyquist.
@@ -363,22 +371,9 @@ private:
     // unconditionally stable regardless of modulation speed.
     float G = g1 * g1 * g1 * g1;
 
-    // Clamp maximum feedback gain. With kNorm=0.811, ResK_J6(1.0) ≈ 6.0,
-    // soft-clipped to ~4.9 — this clamp is a safety net that doesn't
-    // engage under normal operation but prevents runaway if k is
-    // driven beyond the calibrated range (e.g. by external modulation).
-    k = std::min(k, 6.6f);
-
     float S = mS[0] * g1 * g1 * g1 + mS[1] * g1 * g1 + mS[2] * g1 + mS[3];
 
-    // Q compensation: the BA662 differential topology feeds the input
-    // signal through R5(47K) to +IN alongside the LP4 feedback on -IN
-    // via R3(100K). Since the BA662 gain scales with the resonance CV,
-    // higher resonance boosts the input feed-forward, counteracting the
-    // passband volume drop. The 47K:100K ratio means the input drives
-    // the BA662 about 2x harder than the feedback — a key part of the
-    // Juno's warmth at high resonance.
-    float comp = 1.f + k * 0.06f;
+    float comp = InputComp(k);
 
     // BA662 feedback path: models the R3(100K)/R1(1.5K) voltage divider
     // that attenuates the LP4 output before the BA662 differential pair.

@@ -163,12 +163,10 @@ static constexpr float kSawCurve = 0.00f;
     // Phase wraparound: saw resets, sub toggles, blip triggers.
     // Wrap BEFORE waveform computation so the fractional overshoot
     // (mPos after wrap) tells polyBLEP exactly where we crossed.
-    bool sawReset = false;
     if (mPos >= 1.f) {
       mPos -= 1.f;
       mSubState = !mSubState;
       sync = mSubState; // sync pulse every 2 DCO cycles (sub period)
-      sawReset = true;
       mBlipEnv = 1.f;
     }
 
