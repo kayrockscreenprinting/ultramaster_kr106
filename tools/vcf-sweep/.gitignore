@@ -4,5 +4,6 @@ vcf_quick
 vcf_res_sweep
 vcf_thd
 vcf_peaks
+vcf_cutoff
 *.wav
 *.csv

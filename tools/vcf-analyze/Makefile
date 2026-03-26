@@ -1,13 +1,16 @@
 CXX ?= clang++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
-TARGET = vcf_analyze
+DSP = ../../Source/DSP
 
-all: $(TARGET)
+all: vcf_analyze gen_filter_test
 
-$(TARGET): vcf_analyze.cpp ../../Source/DSP/KR106VCF.h
+vcf_analyze: vcf_analyze.cpp
 	$(CXX) $(CXXFLAGS) -o $@ vcf_analyze.cpp
 
+gen_filter_test: gen_filter_test.cpp
+	$(CXX) $(CXXFLAGS) -o $@ gen_filter_test.cpp
+
 clean:
-	rm -f $(TARGET)
+	rm -f vcf_analyze gen_filter_test
 
 .PHONY: all clean

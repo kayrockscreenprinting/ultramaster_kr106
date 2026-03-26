@@ -1,2 +1,5 @@
 vcf_analyze
+gen_filter_test
 *.csv
+*.wav
+*.mid
