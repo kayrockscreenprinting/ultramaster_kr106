@@ -264,14 +264,22 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     }
 
     case kVcaLevel: {
-      // Master VCA (IC5, µPC1252H2) — final stage summing all 6 voices.
-      // Control range: +4V (max) to -6V (min), with -1V = unity gain.
-      // Gain law is linear with control current (transconductance), giving
-      // ~6.5 dB of total range: +2.65 dB at +4V, -3.87 dB at -6V.
-      // This is intentional — it's a level trim, not a wide-range volume control.
-      static constexpr float kGainMin = 0.6405f; // 10^(-3.87/20)
-      static constexpr float kGainMax = 1.3567f; // 10^(+2.65/20)
-      mVcaLevel = kGainMin + (kGainMax - kGainMin) * static_cast<float>(value);
+      // Patch Level VCA (PC1252H2 compander IC used as VCA)
+      //
+      // A user-adjustable level slider stored with each patch normalizes
+      // signal amplitude for consistent volume when switching patches
+      // during performance. All signal passes through this stage regardless
+      // of whether the chorus is engaged.
+      //
+      // The control voltage ranges from +4V (max cut) to -6V (max boost)
+      // with -1V as unity. A 15K pullup to +15V biases the asymmetric CV
+      // range into a symmetric gain range. The PC1252H2 control constant
+      // is -5.9 mV/dB, yielding approximately +/-10.6 dB of gain range.
+      // dB-linear law: slider 0 = -10.6 dB, slider 0.5 = unity, slider 1 = +10.6 dB
+      static constexpr float kMinDB = -10.6f;
+      static constexpr float kMaxDB = +10.6f;
+      float dB = kMinDB + (kMaxDB - kMinDB) * static_cast<float>(value);
+      mVcaLevel = powf(10.f, dB / 20.f);
       break;
     }
 

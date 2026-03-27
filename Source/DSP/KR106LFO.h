@@ -34,9 +34,7 @@ enum LfoDivision
   kLfoDiv16,      // 1/16 note
   kLfoDiv16T,     // 1/16 triplet
   kLfoDiv32,      // 1/32 note
-  kLfoDiv32T,     // 1/32 triplet
   kLfoDiv64,      // 1/64 note
-  kLfoDiv128,     // 1/128 note
   kNumLfoDivisions
 };
 
@@ -54,13 +52,11 @@ static constexpr double kLfoDivBeats[kNumLfoDivisions] = {
   0.25,        // 1/16
   1.0 / 6.0,   // 1/16T
   0.125,       // 1/32
-  1.0 / 12.0,  // 1/32T
-  0.0625,      // 1/64
-  0.03125      // 1/128
+  0.0625       // 1/64
 };
 
 static constexpr const char* kLfoDivNames[kNumLfoDivisions] = {
-  "24 Beats", "16 Beats", "8 Beats", "4 Beats", "2 Beats", "Quarter", "Quarter Triplet", "Eighth", "Eighth Triplet", "16th Note", "16th Triplet", "32nd Note", "32nd Triplet", "64th Note", "128th Note"
+  "24 Beats", "16 Beats", "8 Beats", "4 Beats", "2 Beats", "Quarter", "Quarter Triplet", "Eighth", "Eighth Triplet", "16th Note", "16th Triplet", "32nd Note", "64th Note"
 };
 
 static inline int lfoDivisionFromSlider(float t)

@@ -1,2 +1,5 @@
 render_midi
+peak_presets
+vca_sweep
 *.wav
+*.csv
