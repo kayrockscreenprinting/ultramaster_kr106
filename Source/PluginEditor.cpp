@@ -215,14 +215,19 @@ void KR106Editor::showSettingsMenu()
 
     int vc = mProcessor.mVoiceCount;
     std::vector<KR106MenuItem> items;
-    items.push_back(KR106MenuItem::item(1,  "100%", true, mUIScale == 1.f));
-    items.push_back(KR106MenuItem::item(2,  "150%", true, mUIScale == 1.5f));
-    items.push_back(KR106MenuItem::item(3,  "200%", true, mUIScale == 2.f));
+    // Left column
+    items.push_back(KR106MenuItem::makeRadio(1,  "100%", mUIScale == 1.f));
+    items.push_back(KR106MenuItem::makeRadio(2,  "150%", mUIScale == 1.5f));
+    items.push_back(KR106MenuItem::makeRadio(3,  "200%", mUIScale == 2.f));
     items.push_back(KR106MenuItem::sep());
-    items.push_back(KR106MenuItem::item(10, "06 Voices",  true, vc == 6));
-    items.push_back(KR106MenuItem::item(11, "08 Voices",  true, vc == 8));
-    items.push_back(KR106MenuItem::item(12, "10 Voices", true, vc == 10));
+    items.push_back(KR106MenuItem::makeRadio(10, "06 Voices",  vc == 6));
+    items.push_back(KR106MenuItem::makeRadio(11, "08 Voices",  vc == 8));
+    items.push_back(KR106MenuItem::makeRadio(12, "10 Voices", vc == 10));
     items.push_back(KR106MenuItem::sep());
+    int os = mProcessor.mVcfOversample;
+    items.push_back(KR106MenuItem::makeRadio(30, "VCF Oversample 2x", os == 2));
+    items.push_back(KR106MenuItem::makeRadio(31, "VCF Oversample 4x", os == 4));
+    // Right column                                                    // index 10
     items.push_back(KR106MenuItem::item(20, "Ignore MIDI Velocity",      true, mProcessor.mIgnoreVelocity));
     items.push_back(KR106MenuItem::item(21, "Limit Arp to Kbd Range", true, mProcessor.mArpLimitKbd));
     items.push_back(KR106MenuItem::item(24, "Sync Arp to Host",      true, mProcessor.mArpSyncHost));
@@ -230,18 +235,13 @@ void KR106Editor::showSettingsMenu()
     items.push_back(KR106MenuItem::item(22, "Mono Retrigger",        true, mProcessor.mMonoRetrigger));
     items.push_back(KR106MenuItem::item(23, "Classic VCF Frq Scale", true, mProcessor.mJ6ClassicVcf));
     items.push_back(KR106MenuItem::sep());
-    int os = mProcessor.mVcfOversample;
-    items.push_back(KR106MenuItem::item(30, "VCF Oversample 2x", true, os == 2));
-    items.push_back(KR106MenuItem::item(31, "VCF Oversample 4x", true, os == 4));
-    items.push_back(KR106MenuItem::sep());
-    items.push_back(KR106MenuItem::item(40, "Component Variance Editor"));
-    items.push_back(KR106MenuItem::item(41, "Keyboard Shortcuts"));
+    items.push_back(KR106MenuItem::makeAction(40, "Component Variance Editor"));
+    items.push_back(KR106MenuItem::makeAction(41, "Keyboard Shortcuts"));
 
     mSettingsMenu = std::make_unique<KR106MenuSheet>(std::move(items), mMenuTypeface,
         [this](int r)
         {
-            mSettingsMenu.reset();
-            if (r == 0) return;
+            if (r == 0) { mSettingsMenu.reset(); return; }
             float s = r == 1 ? 1.f : r == 2 ? 1.5f : r == 3 ? 2.f : 0.f;
             if (s > 0.f && s != mUIScale)
             {
@@ -299,7 +299,7 @@ void KR106Editor::showSettingsMenu()
             if (r == 41)
                 showQwertyDiagram();
             mProcessor.saveGlobalSettings();
-        });
+        }, 10);
 
     int menuH = mSettingsMenu->calcHeight();
     int menuW = mSettingsMenu->calcWidth();

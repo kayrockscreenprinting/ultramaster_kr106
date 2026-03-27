@@ -24,18 +24,19 @@ public:
     static constexpr float kGridW = 1.f;
     static constexpr int   kTickSpacing = 5;
     static inline juce::Colour cBlack()  { return juce::Colour(0, 0, 0); }
+    static inline juce::Colour cGrid()   { return juce::Colour(0, 64, 0); }
     static inline juce::Colour cDim()    { return juce::Colour(0, 128, 0); }
     static inline juce::Colour cMid()    { return juce::Colour(0, 192, 0); }
     static inline juce::Colour cBright() { return juce::Colour(0, 255, 0); }
 
     // Center crosshairs with tick marks every kTickSpacing px
-    void paintCrosshairs(juce::Graphics& g, int w, int h, juce::Colour dim)
+    void paintCrosshairs(juce::Graphics& g, int w, int h, juce::Colour /*dim*/)
     {
         float cx = std::round(w * 0.5f);
         float cy = std::round(h * 0.5f);
 
         // Center lines
-        g.setColour(dim);
+        g.setColour(cGrid());
         g.fillRect(cx, 0.f, kGridW, static_cast<float>(h));
         g.fillRect(0.f, cy, static_cast<float>(w), kGridW);
 
@@ -72,12 +73,17 @@ public:
             int prev = mPatchBankHover;
             mPatchBankHover = patchIndexAt(e.x, e.y);
             if (mPatchBankHover != prev) repaint();
+
+            int prevNav = mPBNavHover;
+            mPBNavHover = (e.y >= kPBGridH) ? (e.x < getWidth() / 2 ? 0 : 1) : -1;
+            if (mPBNavHover != prevNav) repaint();
         }
     }
 
     void mouseExit(const juce::MouseEvent&) override
     {
         if (mPatchBankHover >= 0) { mPatchBankHover = -1; repaint(); }
+        if (mPBNavHover >= 0) { mPBNavHover = -1; repaint(); }
     }
 
     void paint(juce::Graphics& g) override
@@ -114,13 +120,24 @@ public:
                 repaint();
                 return;
             }
+
+            // Nav area: < and > cycle scope mode
+            if (e.y >= kPBGridH)
+            {
+                if (e.x < getWidth() / 2)
+                    cycleMode(-1);
+                else
+                    cycleMode(1);
+                return;
+            }
+
             int idx = patchIndexAt(e.x, e.y);
             if (idx < 0) return;
 
             // Select patch and start drag
             mProcessor->setCurrentProgram(idx);
-            mDragOriginX = (idx % 16) * (getWidth() / 16) + (getWidth() / 32);
-            mDragOriginY = (idx / 16) * (getHeight() / 8) + (getHeight() / 16);
+            mDragOriginX = (idx % kPBCols) * kPBCell + kPBCell / 2;
+            mDragOriginY = (idx / kPBCols) * kPBCell + kPBCell / 2;
             mDragEndX = e.x;
             mDragEndY = e.y;
             mDragging = true;
@@ -163,8 +180,8 @@ public:
                 mBallAccum = 0.f;
                 mBallErrX = 0.f;
                 mBallErrY = 0.f;
-                mBallCellX = originIdx % 16;
-                mBallCellY = originIdx / 16;
+                mBallCellX = originIdx % kPBCols;
+                mBallCellY = originIdx / kPBCols;
                 // Direction opposite to drag (pool cue)
                 mBallDX = -dx / mag;
                 mBallDY = -dy / mag;
@@ -177,10 +194,8 @@ public:
     void cycleMode(int delta)
     {
         mAboutActive = false;
-        // Skip patch bank (mode 4) when cycling — only accessible via P key
         int n = kNumModes;
         int next = ((mScaleIdx + delta) % n + n) % n;
-        if (next == 4) next = ((next + delta) % n + n) % n;
         mScaleIdx = next;
         repaint();
     }
@@ -320,15 +335,15 @@ private:
         }
 
         // Bounce off walls
-        if (cx < 0)  { cx = 1;  mBallDX = -mBallDX; }
-        if (cx > 15) { cx = 14; mBallDX = -mBallDX; }
-        if (cy < 0)  { cy = 1;  mBallDY = -mBallDY; }
-        if (cy > 7)  { cy = 6;  mBallDY = -mBallDY; }
+        if (cx < 0)              { cx = 1;            mBallDX = -mBallDX; }
+        if (cx > kPBCols - 1)    { cx = kPBCols - 2;  mBallDX = -mBallDX; }
+        if (cy < 0)              { cy = 1;            mBallDY = -mBallDY; }
+        if (cy > kPBRows - 1)    { cy = kPBRows - 2;  mBallDY = -mBallDY; }
 
         mBallCellX = cx;
         mBallCellY = cy;
 
-        int cellIdx = cy * 16 + cx;
+        int cellIdx = cy * kPBCols + cx;
         int num = mProcessor->getNumPrograms();
         if (cellIdx >= 0 && cellIdx < num)
         {
@@ -338,15 +353,16 @@ private:
         }
     }
 
+    static constexpr int kPBCols = 16, kPBRows = 8, kPBCell = 8;
+    static constexpr int kPBGridH = kPBRows * kPBCell; // 64px for grid, rest for nav
+
     int patchIndexAt(int x, int y) const
     {
-        int cols = 16, rows = 8;
-        int cellW = getWidth() / cols;
-        int cellH = getHeight() / rows;
-        int col = x / cellW;
-        int row = y / cellH;
-        if (col < 0 || col >= cols || row < 0 || row >= rows) return -1;
-        int idx = row * cols + col;
+        if (y >= kPBGridH) return -1; // nav area
+        int col = x / kPBCell;
+        int row = y / kPBCell;
+        if (col < 0 || col >= kPBCols || row < 0 || row >= kPBRows) return -1;
+        int idx = row * kPBCols + col;
         int num = mProcessor ? mProcessor->getNumPrograms() : 128;
         return (idx >= 0 && idx < num) ? idx : -1;
     }
@@ -462,7 +478,7 @@ private:
         float logRange = logMax - logMin;
 
         // Grid: vertical lines at decades + log tick marks at bottom
-        g.setColour(dim);
+        g.setColour(cGrid());
         for (int decade = 1; decade <= 4; decade++)
         {
             for (int m = 1; m <= 9; m++)
@@ -483,7 +499,7 @@ private:
         {
             if (db > kMaxDb) continue;
             float yf = (1.f - (db - kMinDb) / kDbRange) * (h - 1);
-            g.setColour(dim);
+            g.setColour(cGrid());
             g.fillRect(0.f, std::round(yf), static_cast<float>(w), 1.f);
         }
 
@@ -566,7 +582,7 @@ private:
         int yBotStart = hTop + 1;
 
         // Horizontal divider line with tick marks
-        g.setColour(dim);
+        g.setColour(cGrid());
         g.fillRect(0.f, static_cast<float>(yDivider), static_cast<float>(w), 1.f);
         int halfSecs = static_cast<int>(kWindowMs / 500.f);
         for (int hs = 1; hs < halfSecs; hs++)
@@ -579,7 +595,7 @@ private:
 
         // Phase boundary: A|D (top half)
         float xAD = std::round(std::min(attackMs / kWindowMs, 1.f) * (w - 1));
-        g.setColour(dim);
+        g.setColour(cGrid());
         if (xAD > 0.f && xAD < w - 1)
             g.fillRect(xAD, 0.f, 1.f, static_cast<float>(hTop));
 
@@ -764,7 +780,7 @@ private:
         float logRange = logMax - logMin;
 
         // Grid: vertical lines at decades + log tick marks at bottom
-        g.setColour(dim);
+        g.setColour(cGrid());
         for (int decade = 0; decade <= 4; decade++)
         {
             for (int m = 1; m <= 9; m++)
@@ -784,14 +800,14 @@ private:
         for (float db = kMinDb + 12.f; db < kMaxDb; db += 12.f)
         {
             float yf = (1.f - (db - kMinDb) / kDbRange) * (h - 1);
-            g.setColour(db == 0.f ? mid : dim);
+            g.setColour(db == 0.f ? dim : cGrid());
             g.fillRect(0.f, std::round(yf), static_cast<float>(w), 1.f);
         }
 
         // Cutoff frequency marker
         if (fcSlider >= kMinHz && fcSlider <= kMaxHz)
         {
-            g.setColour(mid);
+            g.setColour(dim);
             float xfc = (log10f(fcSlider) - logMin) / logRange * (w - 1);
             g.fillRect(std::round(xfc), 0.f, 1.f, static_cast<float>(h));
         }
@@ -803,7 +819,9 @@ private:
         // In normalized frequency (x = f/fc):
         //   |H|² = comp² / ((1+x²)⁴ + 2k(1+x²)²cos(4·atan(x)) + k²)
         float k2 = k * k;
-        float comp2 = comp * comp;
+        float outputGain = 4.85f; // must match VCF::Process() output scaling
+        float totalComp = comp * outputGain;
+        float comp2 = totalComp * totalComp;
 
         auto evalDb = [&](float px) -> float {
             float logF = logMin + px / (w - 1) * logRange;
@@ -1021,66 +1039,96 @@ private:
         traceStr(ver.toRawUTF8(), cx, h * 0.70f, h * 0.10f);
     }
 
-    // ---- Patch bank (128 rectangles in 16×8 grid) ----
+    // ---- Patch bank (128 squares in 16x8 grid + nav buttons) ----
     void paintPatchBank(juce::Graphics& g, int w, int h,
                         juce::Colour dim, juce::Colour mid, juce::Colour bright)
     {
         if (!mProcessor) return;
 
-        int cols = 16, rows = 8;
-        int cellW = w / cols;
-        int cellH = h / rows;
         int num = mProcessor->getNumPrograms();
         int cur = mProcessor->getCurrentProgram();
 
-        // Draw grid lines (shifted 0.5px right, 1px down to center in gaps)
-        auto gridCol = juce::Colour(0, 64, 0);
-        g.setColour(gridCol);
-        for (int c = 1; c < cols; c++)
-            g.fillRect(c * cellW - 0.5f, 1.f, 1.f, static_cast<float>(rows * cellH));
-        for (int r = 1; r <= rows; r++)
-            g.fillRect(0.f, static_cast<float>(r * cellH), static_cast<float>(cols * cellW), 1.f);
+        // Grid lines
+        g.setColour(cGrid());
+        for (int c = 1; c < kPBCols; c++)
+            g.fillRect(c * kPBCell, 0, 1, kPBGridH);
+        for (int r = 1; r <= kPBRows; r++)
+            g.fillRect(0, r * kPBCell, kPBCols * kPBCell, 1);
 
-        // Fill selected and hovered cells
-        for (int r = 0; r < rows; r++)
+        // Fill cells
+        for (int r = 0; r < kPBRows; r++)
         {
-            for (int c = 0; c < cols; c++)
+            for (int c = 0; c < kPBCols; c++)
             {
-                int idx = r * cols + c;
+                int idx = r * kPBCols + c;
                 if (idx >= num) break;
 
-                int x = c * cellW;
-                int y = r * cellH;
+                int x = c * kPBCell;
+                int y = r * kPBCell;
 
                 if (idx == cur)
                 {
                     g.setColour(bright);
-                    g.fillRect(x, y, cellW - 1, cellH - 1);
+                    g.fillRect(x + 1, y + 1, kPBCell - 1, kPBCell - 1);
                 }
             }
         }
 
-        // Draw drag vector as filled cells (Bresenham on 16×8 grid)
+        // Drag vector (Bresenham on grid)
         if (mDragging)
         {
-            int c0 = mDragOriginX / cellW, r0 = mDragOriginY / cellH;
-            int c1 = std::clamp(mDragEndX / cellW, 0, cols - 1);
-            int r1 = std::clamp(mDragEndY / cellH, 0, rows - 1);
+            int c0 = mDragOriginX / kPBCell, r0 = mDragOriginY / kPBCell;
+            int c1 = std::clamp(mDragEndX / kPBCell, 0, kPBCols - 1);
+            int r1 = std::clamp(mDragEndY / kPBCell, 0, kPBRows - 1);
             int dx = std::abs(c1 - c0), dy = -std::abs(r1 - r0);
             int sx = c0 < c1 ? 1 : -1, sy = r0 < r1 ? 1 : -1;
             int err = dx + dy;
             g.setColour(mid);
             for (;;)
             {
-                int idx = r0 * cols + c0;
-                if (idx != cur) // don't overdraw the selected cell
-                    g.fillRect(c0 * cellW, r0 * cellH, cellW - 1, cellH - 1);
+                int idx = r0 * kPBCols + c0;
+                if (idx != cur)
+                    g.fillRect(c0 * kPBCell + 1, r0 * kPBCell + 1, kPBCell - 1, kPBCell - 1);
                 if (c0 == c1 && r0 == r1) break;
                 int e2 = 2 * err;
                 if (e2 >= dy) { err += dy; c0 += sx; }
                 if (e2 <= dx) { err += dx; r0 += sy; }
             }
         }
+
+        // Nav area: < and > below the grid (cycle scope mode)
+        int navY = kPBGridH + 1;
+        int navH = h - navY;
+        int half = w / 2;
+
+        // Hover highlight
+        if (mPBNavHover >= 0)
+        {
+            auto hoverCol = juce::Colour(0, 40, 0);
+            g.setColour(hoverCol);
+            if (mPBNavHover == 0)
+                g.fillRect(0, navY, half, navH);
+            else
+                g.fillRect(half + 1, navY, half - 1, navH);
+        }
+
+        // Divider
+        g.setColour(cGrid());
+        g.fillRect(half, navY, 1, navH);
+
+        // < arrow (left half)
+        g.setColour(dim);
+        int ax = half / 2, ay = navY + navH / 2;
+        g.drawLine(static_cast<float>(ax + 3), static_cast<float>(ay - 3),
+                   static_cast<float>(ax), static_cast<float>(ay), 1.f);
+        g.drawLine(static_cast<float>(ax), static_cast<float>(ay),
+                   static_cast<float>(ax + 3), static_cast<float>(ay + 3), 1.f);
+        // > arrow (right half)
+        ax = half + half / 2;
+        g.drawLine(static_cast<float>(ax - 3), static_cast<float>(ay - 3),
+                   static_cast<float>(ax), static_cast<float>(ay), 1.f);
+        g.drawLine(static_cast<float>(ax), static_cast<float>(ay),
+                   static_cast<float>(ax - 3), static_cast<float>(ay + 3), 1.f);
     }
 
     // ---- About / version display (oscilloscope beam trace with phosphor decay) ----
@@ -1139,6 +1187,7 @@ private:
     int mScaleIdx = 0;
     int mPrePatchBankMode = 0; // mode to return to when toggling patch bank off
     int mPatchBankHover = -1;  // hovered patch index, or -1
+    int mPBNavHover = -1;      // hovered nav button: 0=left, 1=right, -1=none
 
     // Bouncing ball state
     bool  mBallActive = false;

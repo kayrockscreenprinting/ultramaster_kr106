@@ -53,14 +53,17 @@ public:
 
     const auto white = juce::Colour(255, 255, 255);
     const auto black = juce::Colour(0, 0, 0);
-    const auto dark  = juce::Colour(64, 64, 64);
-    const auto light = juce::Colour(153, 153, 153);
+    const auto dark  = juce::Colour(34, 34, 34);
 
     // Well (centered in 19px: offset 3px from 13px layout)
     static constexpr float kOfs = 3.f;
-    g.setColour(black); g.fillRect(5.f + kOfs, 1.f, 3.f, 47.f);
-    vLine(dark, 4 + kOfs, 1, 48); vLine(dark, 8 + kOfs, 1, 48);
-    hLine(dark, 5 + kOfs, 0, 8 + kOfs);  hLine(dark, 5 + kOfs, 48, 8 + kOfs);
+ 
+    g.setColour(dark);
+    g.fillRect(4.f + kOfs, 1.f, 5.f, 47.f);
+    hLine(dark, 5 + kOfs, 0, 8 + kOfs);  
+    hLine(dark, 5 + kOfs, 48, 8 + kOfs);
+    g.setColour(black);
+    g.fillRect(6.f + kOfs, 2.f, 1.f, 45.f);
 
     // Handle
     float val = mParam ? mParam->getValue() : 0.f;
@@ -70,7 +73,7 @@ public:
     {
       float hw = mHandleImg.getWidth() / 2.f;
       float hh = mHandleImg.getHeight() / 2.f;
-      float hx = (19.f - hw) * 0.5f;
+      float hx = std::floor((19.f - hw) * 0.5f);
       g.drawImage(mHandleImg,
                   hx, fy - hh * 0.5f + 1.f, hw, hh,
                   0, 0, mHandleImg.getWidth(), mHandleImg.getHeight());
@@ -485,12 +488,15 @@ public:
     {
       auto bright = juce::Colour(219, 219, 219);
       auto dim    = juce::Colour(126, 126, 126);
+      // Draw every other division (7 ticks from 13 divisions)
       float tw = 17.f + static_cast<float>(mExtraRight);
-      for (int i = 0; i < kr106::kNumLfoDivisions; i++)
+      int last = kr106::kNumLfoDivisions - 1; // 12
+      int mid = last / 2;                      // 6
+      for (int i = 0; i <= last; i += 2)
       {
-        float norm = static_cast<float>(i) / static_cast<float>(kr106::kNumLfoDivisions - 1);
+        float norm = static_cast<float>(i) / static_cast<float>(last);
         float y = std::round(44.f - norm * 40.f);
-        bool major = (i == 0 || i == kr106::kNumLfoDivisions / 2 || i == kr106::kNumLfoDivisions - 1);
+        bool major = (i == 0 || i == mid || i == last);
         g.setColour(major ? bright : dim);
         g.fillRect(1.f, y, tw, 1.f);
       }

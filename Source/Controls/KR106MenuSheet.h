@@ -62,15 +62,30 @@ struct KR106MenuItem
     bool enabled = true;
     bool ticked = false;
     bool separator = false;
+    bool dismissOnClick = false; // true = dismiss menu on click
 
     static KR106MenuItem item(int id, const juce::String& text, bool enabled = true, bool ticked = false)
     {
-        return { id, text, enabled, ticked, false };
+        return { id, text, enabled, ticked, false, false };
+    }
+
+    static KR106MenuItem makeAction(int id, const juce::String& text)
+    {
+        return { id, text, true, false, false, true };
+    }
+
+    bool radio = false; // true = part of a radio group (mutual exclusion)
+
+    static KR106MenuItem makeRadio(int id, const juce::String& text, bool ticked)
+    {
+        KR106MenuItem m = { id, text, true, ticked, false, false };
+        m.radio = true;
+        return m;
     }
 
     static KR106MenuItem sep()
     {
-        return { 0, {}, false, false, true };
+        return { 0, {}, false, false, true, false };
     }
 };
 
@@ -85,8 +100,10 @@ public:
 
     KR106MenuSheet(std::vector<KR106MenuItem> items,
                    juce::Typeface::Ptr typeface,
-                   std::function<void(int)> onSelect)
-        : mItems(std::move(items)), mTypeface(typeface), mOnSelect(std::move(onSelect))
+                   std::function<void(int)> onSelect,
+                   int columnBreak = -1)
+        : mItems(std::move(items)), mTypeface(typeface), mOnSelect(std::move(onSelect)),
+          mColumnBreak(columnBreak)
     {
         setInterceptsMouseClicks(true, true);
         setWantsKeyboardFocus(true);
@@ -105,8 +122,22 @@ public:
         grabKeyboardFocus();
     }
 
+    int columnHeight(int from, int to) const
+    {
+        int h = 0;
+        for (int i = from; i < to; i++)
+            h += mItems[i].separator ? kSepH : kRowH;
+        return h;
+    }
+
     int calcHeight() const
     {
+        if (mColumnBreak > 0)
+        {
+            int h1 = columnHeight(0, mColumnBreak);
+            int h2 = columnHeight(mColumnBreak, static_cast<int>(mItems.size()));
+            return std::max(h1, h2) + kPadY * 2;
+        }
         int h = kPadY * 2;
         for (auto& item : mItems)
             h += item.separator ? kSepH : kRowH;
@@ -120,22 +151,33 @@ public:
         return false;
     }
 
-    int calcWidth() const
+    int columnWidth(int from, int to) const
     {
         auto font = juce::Font(juce::FontOptions(mTypeface)
             .withMetricsKind(juce::TypefaceMetricsKind::legacy)).withHeight(8.f);
         bool ticked = hasAnyTicked();
         int maxW = 0;
-        for (auto& item : mItems)
+        for (int i = from; i < to; i++)
         {
-            if (item.separator) continue;
-            juce::String label = ticked ? ("* " + item.text) : item.text;
+            if (mItems[i].separator) continue;
+            juce::String label = ticked ? ("* " + mItems[i].text) : mItems[i].text;
             juce::GlyphArrangement glyphs;
             glyphs.addLineOfText(font, label, 0.f, 0.f);
             int w = (int)std::ceil(glyphs.getBoundingBox(0, -1, false).getWidth());
             maxW = juce::jmax(maxW, w);
         }
         return maxW + kPadX * 2;
+    }
+
+    int calcWidth() const
+    {
+        if (mColumnBreak > 0)
+        {
+            int w1 = columnWidth(0, mColumnBreak);
+            int w2 = columnWidth(mColumnBreak, static_cast<int>(mItems.size()));
+            return w1 + w2 + 1; // 1px divider
+        }
+        return columnWidth(0, static_cast<int>(mItems.size()));
     }
 
     void paint(juce::Graphics& g) override
@@ -145,35 +187,68 @@ public:
         g.setFont(KR106Theme::ledFont(mTypeface));
 
         bool anyTicked = hasAnyTicked();
-        int y = mMenuBounds.getY() + kPadY;
-        for (int i = 0; i < (int)mItems.size(); i++)
+
+        auto paintColumn = [&](int from, int to, int colX, int colW)
         {
-            auto& item = mItems[i];
+            // Find first and last non-separator items
+            int firstItem = -1, lastItem = -1;
+            for (int i = from; i < to; i++)
+                if (!mItems[i].separator) { if (firstItem < 0) firstItem = i; lastItem = i; }
 
-            if (item.separator)
+            int y = mMenuBounds.getY() + kPadY;
+            for (int i = from; i < to; i++)
             {
-                g.setColour(KR106Theme::border());
-                g.drawHorizontalLine(y, static_cast<float>(mMenuBounds.getX()),
-                                     static_cast<float>(mMenuBounds.getRight()));
-                y += kSepH;
-                continue;
-            }
+                auto& item = mItems[i];
 
-            bool hover = (i == mHoverIndex && item.enabled);
-            juce::String label = anyTicked ? (item.ticked ? ("* " + item.text) : ("  " + item.text)) : item.text;
+                if (item.separator)
+                {
+                    g.setColour(KR106Theme::border());
+                    g.drawHorizontalLine(y, static_cast<float>(colX),
+                                         static_cast<float>(colX + colW));
+                    y += kSepH;
+                    continue;
+                }
 
-            if (!item.enabled)
-            {
-                g.setColour(KR106Theme::disabled());
-                g.drawSingleLineText(label, mMenuBounds.getX() + kPadX, y + kRowH - KR106Theme::kTextOffset);
-            }
-            else
-            {
-                KR106Theme::drawCell(g, label, mMenuBounds.getX(), y,
-                                     mMenuBounds.getWidth(), kRowH, hover, false);
-            }
+                bool hover = (i == mHoverIndex && item.enabled);
+                juce::String label = anyTicked ? (item.ticked ? ("* " + item.text) : ("  " + item.text)) : item.text;
 
-            y += kRowH;
+                // Extend hover fill into padding for first/last items
+                if (hover && item.enabled && (i == firstItem || i == lastItem))
+                {
+                    g.setColour(KR106Theme::hoverBg());
+                    if (i == firstItem) g.fillRect(colX, y - kPadY, colW, kPadY);
+                    if (i == lastItem)  g.fillRect(colX, y + kRowH, colW, kPadY);
+                }
+
+                if (!item.enabled)
+                {
+                    g.setColour(KR106Theme::disabled());
+                    g.drawSingleLineText(label, colX + kPadX, y + kRowH - KR106Theme::kTextOffset);
+                }
+                else
+                {
+                    KR106Theme::drawCell(g, label, colX, y, colW, kRowH, hover, false);
+                }
+
+                y += kRowH;
+            }
+        };
+
+        if (mColumnBreak > 0)
+        {
+            int w1 = columnWidth(0, mColumnBreak);
+            int x0 = mMenuBounds.getX();
+            paintColumn(0, mColumnBreak, x0, w1);
+            // Divider
+            g.setColour(KR106Theme::border());
+            g.fillRect(x0 + w1, mMenuBounds.getY(), 1, mMenuBounds.getHeight());
+            paintColumn(mColumnBreak, static_cast<int>(mItems.size()), x0 + w1 + 1,
+                        mMenuBounds.getWidth() - w1 - 1);
+        }
+        else
+        {
+            paintColumn(0, static_cast<int>(mItems.size()), mMenuBounds.getX(),
+                        mMenuBounds.getWidth());
         }
 
         g.setColour(KR106Theme::border());
@@ -196,10 +271,32 @@ public:
         if (idx >= 0 && idx < (int)mItems.size() && mItems[idx].enabled && !mItems[idx].separator)
         {
             int id = mItems[idx].id;
-            setVisible(false);
-            auto cb = std::move(mOnSelect);
-            mOnSelect = nullptr;
-            if (cb) cb(id);
+            if (mItems[idx].dismissOnClick)
+            {
+                // Action item: fire callback and dismiss
+                if (mOnSelect) mOnSelect(id);
+                dismiss();
+                return;
+            }
+            if (mItems[idx].radio)
+            {
+                // Radio item: untick siblings, tick this one, stay open
+                if (mOnSelect) mOnSelect(id);
+                // Find group bounds (adjacent radio items, delimited by separators)
+                int groupStart = idx, groupEnd = idx;
+                while (groupStart > 0 && !mItems[groupStart - 1].separator)
+                    groupStart--;
+                while (groupEnd < (int)mItems.size() - 1 && !mItems[groupEnd + 1].separator)
+                    groupEnd++;
+                for (int j = groupStart; j <= groupEnd; j++)
+                    if (mItems[j].radio) mItems[j].ticked = (j == idx);
+                repaint();
+                return;
+            }
+            // Toggle item: fire callback, update tick, stay open
+            if (mOnSelect) mOnSelect(id);
+            mItems[idx].ticked = !mItems[idx].ticked;
+            repaint();
             return;
         }
         // Click outside menu or on separator/disabled item — dismiss
@@ -222,8 +319,20 @@ private:
         if (!mMenuBounds.contains(pos)) return -1;
         int py = pos.y - mMenuBounds.getY() - kPadY;
         if (py < 0) return -1;
+
+        int from = 0, to = static_cast<int>(mItems.size());
+        if (mColumnBreak > 0)
+        {
+            int w1 = columnWidth(0, mColumnBreak);
+            int px = pos.x - mMenuBounds.getX();
+            if (px <= w1)
+                to = mColumnBreak;
+            else
+                from = mColumnBreak;
+        }
+
         int y = 0;
-        for (int i = 0; i < (int)mItems.size(); i++)
+        for (int i = from; i < to; i++)
         {
             int h = mItems[i].separator ? kSepH : kRowH;
             if (py >= y && py < y + h)
@@ -246,4 +355,5 @@ private:
     std::function<void(int)> mOnSelect;
     juce::Rectangle<int> mMenuBounds;
     int mHoverIndex = -1;
+    int mColumnBreak = -1; // item index where second column starts (-1 = single column)
 };
