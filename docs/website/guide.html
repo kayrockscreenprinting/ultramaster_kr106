@@ -431,6 +431,8 @@
     <li><strong>6 / 8 / 10 Voices</strong> Maximum polyphony. More voices use more CPU.</li>
     <li><strong>Ignore MIDI Velocity</strong> All notes play at full velocity, like the original hardware.</li>
     <li><strong>Limit Arp to Keyboard Range</strong> Arpeggio wraps notes back into the 61-key range instead of extending beyond it.</li>
+    <li><strong>Sync Arp to Host</strong> When on, the arpeggiator locks to the DAW's tempo. The Arp Rate slider snaps to note divisions (4 Beats, 2 Beats, Quarter, Quarter Triplet, Eighth, Eighth Triplet, 16th, 16th Triplet, 32nd). Steps align to the beat grid when the transport is playing. When the transport is stopped, the arp free-runs at the tempo-matched rate. In standalone mode, syncs to 120 BPM.</li>
+    <li><strong>Sync LFO to Host</strong> When on, the LFO rate locks to the DAW's tempo. The LFO Rate slider snaps to note divisions (24 Beats down to 64th Note). The LFO phase resets when the transport starts. When both Arp and LFO are synced, their rates lock to exact multiples of each other.</li>
     <li><strong>Mono Retrigger</strong> When on (default), every new note in mono mode retriggers the envelope. When off, legato notes glide without retriggering.</li>
     <li><strong>Classic VCF Frq Scale</strong> When on, 1982 mode uses the authentic Juno-6 VCF frequency curve and C1 keyboard tracking reference. When off (default), 1982 mode uses the 1984 frequency scale for better patch compatibility between modes.</li>
     <li><strong>VCF Oversample 2x / 4x</strong> Filter oversampling factor. 4x (default) gives clean self-oscillation tracking up to 20 kHz. 2x uses less CPU but may alias at high cutoff + high resonance.</li>
