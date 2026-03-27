@@ -453,6 +453,23 @@
     <h2>Changelog</h2>
 
     <details open>
+      <summary><span class="ver">2.4.4</span> DAW sync, VCA/VCF corrections, UI improvements</summary>
+      <ul>
+        <li>Arpeggiator DAW sync: locks to host tempo with 9 note divisions (4 Beats to 32nd Note), beat-grid aligned stepping</li>
+        <li>LFO DAW sync: 13 divisions (24 Beats to 64th Note), phase resets on transport start</li>
+        <li>Both sync modes free-run at tempo-matched rate when transport is stopped</li>
+        <li>VCA Level: dB-linear gain law with correct +-10.6 dB range (PC1252H2 circuit analysis)</li>
+        <li>VCF output gain corrected from hardware recordings (self-oscillation matches saw level)</li>
+        <li>Sliders draw their own tick marks (removed from background image), wider hit area</li>
+        <li>Settings menu: two-column layout, radio groups update in-place, toggles stay open for multiple changes</li>
+        <li>Scope: patch bank mode with square cells and nav buttons, dimmer grid lines across all modes</li>
+        <li>VCF scope: frequency response includes output gain, dimmer cutoff marker</li>
+        <li>SysEx send/receive for all parameters, save patch dialog with bank/group/patch selection</li>
+        <li>Standard QWERTY piano layout, keyboard shortcut viewer</li>
+      </ul>
+    </details>
+
+    <details>
       <summary><span class="ver">2.4.3</span> VCF recalibration from hardware measurements</summary>
       <ul>
         <li>Improved self-oscillation: cleaner sine wave, more accurate pitch tracking, consistent volume across the frequency range</li>
