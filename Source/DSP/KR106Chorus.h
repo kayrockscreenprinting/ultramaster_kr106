@@ -250,17 +250,7 @@ struct BBDLine
     // 4. Advance write position
     mWPos = (mWPos + 1) & mMask;
 
-    // 5. Charge-well saturation: models cumulative charge transfer
-    //    nonlinearity across 256 MN3009 stages. Linear below ±0.7,
-    //    gently compresses peaks above that threshold.
-    if (fabsf(wet) > 0.7f)
-    {
-      float sign = (wet > 0.f) ? 1.f : -1.f;
-      float d = fabsf(wet) - 0.7f;
-      wet = sign * (0.7f + d / (1.f + 2.f * d));
-    }
-
-    // 6. Post-filter (4-pole reconstruction, matched to pre-filter)
+    // 5. Post-filter (4-pole reconstruction, matched to pre-filter)
     wet = mPostFilter.Process(wet);
 
     return wet;

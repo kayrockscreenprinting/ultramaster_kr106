@@ -233,6 +233,7 @@ void KR106Editor::showSettingsMenu()
     items.push_back(KR106MenuItem::item(24, "Sync Arp to Host",      true, mProcessor.mArpSyncHost));
     items.push_back(KR106MenuItem::item(25, "Sync LFO to Host",      true, mProcessor.mLfoSyncHost));
     items.push_back(KR106MenuItem::item(22, "Mono Retrigger",        true, mProcessor.mMonoRetrigger));
+    items.push_back(KR106MenuItem::item(26, "MIDI Out: SysEx",       true, mProcessor.mMidiOutSysEx));
     items.push_back(KR106MenuItem::sep());
     items.push_back(KR106MenuItem::makeAction(40, "Component Variance Editor"));
     items.push_back(KR106MenuItem::makeAction(41, "Keyboard Shortcuts"));
@@ -279,6 +280,10 @@ void KR106Editor::showSettingsMenu()
             {
                 mProcessor.mMonoRetrigger = !mProcessor.mMonoRetrigger;
                 mProcessor.mDSP.mMonoRetrigger = mProcessor.mMonoRetrigger;
+            }
+            if (r == 26)
+            {
+                mProcessor.mMidiOutSysEx = !mProcessor.mMidiOutSysEx;
             }
             int newOS = r == 30 ? 2 : r == 31 ? 4 : 0;
             if (newOS > 0 && newOS != mProcessor.mVcfOversample)

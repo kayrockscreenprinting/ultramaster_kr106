@@ -68,6 +68,14 @@ public:
   bool mArpSyncHost = false;   // persisted per instance (sync arp to DAW tempo)
   bool mLfoSyncHost = false;   // persisted per instance (sync LFO to DAW tempo)
   bool mMonoRetrigger = true;  // persisted per instance
+  bool mMidiOutSysEx = false;  // false=CC/PC output, true=SysEx output (J106 style)
+
+  // Cached host transport state (for LV2 hosts that only send updates on change)
+  bool mCachedPlaying = false;
+  double mCachedBPM = 120.0;
+  double mCachedPPQ = 0.0;
+  bool mCachedHaveBPM = false;
+  bool mCachedHavePPQ = false;
 
   int mVcfOversample = 4;      // persisted per instance (2 or 4)
   bool mInitialDefault = true; // shows "Default" until first preset change

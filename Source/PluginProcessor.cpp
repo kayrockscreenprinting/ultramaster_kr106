@@ -561,8 +561,8 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
   // the host's midiMessages while iterating it for note events.
   juce::MidiBuffer midiOut;
 
-  // --- Sync parameter changes from JUCE → DSP + emit MIDI CC ---
-  // Skip CC emission during preset change (SysEx covers it)
+  // --- Sync parameter changes from JUCE → DSP + emit MIDI ---
+  // Skip MIDI emission during preset change (preset dump covers it)
   bool presetChange = mSendPresetSysEx.load(std::memory_order_relaxed);
   for (int i = 0; i < kNumParams; i++)
   {
@@ -572,65 +572,71 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       mLastParamValues[i] = cur;
       parameterChanged(i, cur);
 
-      // Emit MIDI CC + SysEx for individual param changes (not preset load)
+      // Emit MIDI for individual param changes (not preset load)
       if (!presetChange)
       {
-        int cc = sParamToCC[i];
-        if (cc >= 0)
+        if (mMidiOutSysEx)
         {
-          int ccVal = (i == kHpfFreq)
-              ? juce::roundToInt(cur) * 32  // 0-3 → 0/32/64/96
-              : juce::roundToInt(cur * 127.f);
-          midiOut.addEvent(juce::MidiMessage::controllerEvent(1, cc,
-              juce::jlimit(0, 127, ccVal)), 0);
-        }
-
-        // SysEx: F0 41 32 ch ctrl val F7
-        int sx = sParamToSysEx[i];
-        if (sx >= 0)
-        {
-          uint8_t val = static_cast<uint8_t>(juce::roundToInt(cur * 127.f));
-          uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00,
-                               static_cast<uint8_t>(sx), val, 0xF7 };
-          midiOut.addEvent(sysex, 7, 0);
-        }
-
-        // Switch byte 0x10: octave, pulse, saw, chorus
-        for (int s : kSw1Params)
-        {
-          if (i == s)
+          // SysEx mode: IPR (Individual Parameter) messages
+          int sx = sParamToSysEx[i];
+          if (sx >= 0)
           {
-            int oct = juce::roundToInt(getParamValue(kOctTranspose));
-            uint8_t sw1 = 0;
-            if (oct == 2) sw1 |= 0x04;
-            else if (oct == 1) sw1 |= 0x02;
-            else sw1 |= 0x01;
-            if (getParamValue(kDcoPulse) > 0.5f) sw1 |= 0x08;
-            if (getParamValue(kDcoSaw) > 0.5f)   sw1 |= 0x10;
-            bool chorusI   = getParamValue(kChorusI)   > 0.5f;
-            bool chorusII  = getParamValue(kChorusII)  > 0.5f;
-            if (!chorusI && !chorusII) sw1 |= 0x20; // bit5: chorus off
-            if (chorusI) sw1 |= 0x40;               // bit6: level 1
-            uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x10, sw1, 0xF7 };
+            uint8_t val = static_cast<uint8_t>(juce::roundToInt(cur * 127.f));
+            uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00,
+                                 static_cast<uint8_t>(sx), val, 0xF7 };
             midiOut.addEvent(sysex, 7, 0);
-            break;
+          }
+
+          // Switch byte 0x10: octave, pulse, saw, chorus
+          for (int s : kSw1Params)
+          {
+            if (i == s)
+            {
+              int oct = juce::roundToInt(getParamValue(kOctTranspose));
+              uint8_t sw1 = 0;
+              if (oct == 2) sw1 |= 0x04;
+              else if (oct == 1) sw1 |= 0x02;
+              else sw1 |= 0x01;
+              if (getParamValue(kDcoPulse) > 0.5f) sw1 |= 0x08;
+              if (getParamValue(kDcoSaw) > 0.5f)   sw1 |= 0x10;
+              bool chorusI   = getParamValue(kChorusI)   > 0.5f;
+              bool chorusII  = getParamValue(kChorusII)  > 0.5f;
+              if (!chorusI && !chorusII) sw1 |= 0x20;
+              if (chorusI) sw1 |= 0x40;
+              uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x10, sw1, 0xF7 };
+              midiOut.addEvent(sysex, 7, 0);
+              break;
+            }
+          }
+
+          // Switch byte 0x11: PWM mode, VCF polarity, VCA mode, HPF
+          for (int s : kSw2Params)
+          {
+            if (i == s)
+            {
+              uint8_t sw2 = 0;
+              if (juce::roundToInt(getParamValue(kPwmMode)) == 0) sw2 |= 0x01;
+              if (getParamValue(kVcfEnvInv) > 0.5f) sw2 |= 0x02;
+              if (juce::roundToInt(getParamValue(kVcaMode)) == 0) sw2 |= 0x04;
+              int hpf = juce::roundToInt(getParamValue(kHpfFreq));
+              sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
+              uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x11, sw2, 0xF7 };
+              midiOut.addEvent(sysex, 7, 0);
+              break;
+            }
           }
         }
-
-        // Switch byte 0x11: PWM mode, VCF polarity, VCA mode, HPF
-        for (int s : kSw2Params)
+        else
         {
-          if (i == s)
+          // CC mode: standard MIDI CC for param changes
+          int cc = sParamToCC[i];
+          if (cc >= 0)
           {
-            uint8_t sw2 = 0;
-            if (juce::roundToInt(getParamValue(kPwmMode)) == 0) sw2 |= 0x01;
-            if (getParamValue(kVcfEnvInv) > 0.5f) sw2 |= 0x02;
-            if (juce::roundToInt(getParamValue(kVcaMode)) == 0) sw2 |= 0x04;
-            int hpf = juce::roundToInt(getParamValue(kHpfFreq));
-            sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
-            uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x11, sw2, 0xF7 };
-            midiOut.addEvent(sysex, 7, 0);
-            break;
+            int ccVal = (i == kHpfFreq)
+                ? juce::roundToInt(cur) * 32  // 0-3 -> 0/32/64/96
+                : juce::roundToInt(cur * 127.f);
+            midiOut.addEvent(juce::MidiMessage::controllerEvent(1, cc,
+                juce::jlimit(0, 127, ccVal)), 0);
           }
         }
       }
@@ -854,6 +860,9 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
   }
 
   // --- Host sync for arpeggiator and LFO ---
+  // LV2 hosts (Jalv/Zynthian) only send transport atoms on state changes,
+  // not every cycle. Cache the last known state and extrapolate beat position
+  // when the host doesn't provide fresh data.
   mDSP.mArp.mSyncToHost = mArpSyncHost;
   mDSP.mLFO.mSyncToHost = mLfoSyncHost;
   if (mArpSyncHost || mLfoSyncHost)
@@ -862,24 +871,31 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     {
       if (auto pos = ph->getPosition())
       {
-        bool playing = pos->getIsPlaying();
-        double bpm = 120.0;
-        double ppq = 0.0;
-        if (auto b = pos->getBpm()) bpm = *b;
-        if (auto p = pos->getPpqPosition()) ppq = *p;
-
-        if (mArpSyncHost)
-        {
-          mDSP.mArp.mHostPlaying = playing;
-          mDSP.mArp.mHostBPM = bpm;
-          mDSP.mArp.mHostBeatPos = ppq;
-        }
-        if (mLfoSyncHost)
-        {
-          mDSP.mLFO.mHostPlaying = playing;
-          mDSP.mLFO.mHostBPM = bpm;
-        }
+        // Fresh transport data from host -- update cache
+        mCachedPlaying = pos->getIsPlaying();
+        if (auto b = pos->getBpm())         { mCachedBPM = *b; mCachedHaveBPM = true; }
+        if (auto p = pos->getPpqPosition()) { mCachedPPQ = *p; mCachedHavePPQ = true; }
       }
+      else if (mCachedPlaying && mCachedHaveBPM)
+      {
+        // No fresh data but transport was running -- extrapolate beat position
+        double beatsPerSample = mCachedBPM / (60.0 * getSampleRate());
+        mCachedPPQ += beatsPerSample * nFrames;
+      }
+    }
+
+    if (mArpSyncHost)
+    {
+      mDSP.mArp.mSyncToHost = mCachedHaveBPM;
+      mDSP.mArp.mHostPlaying = mCachedPlaying && mCachedHavePPQ;
+      mDSP.mArp.mHostBPM = mCachedBPM;
+      mDSP.mArp.mHostBeatPos = mCachedPPQ;
+    }
+    if (mLfoSyncHost)
+    {
+      mDSP.mLFO.mSyncToHost = mCachedHaveBPM;
+      mDSP.mLFO.mHostPlaying = mCachedPlaying;
+      mDSP.mLFO.mHostBPM = mCachedBPM;
     }
   }
 
@@ -926,52 +942,57 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     mScopeWritePos.store(wp, std::memory_order_release);
   }
 
-  // --- Emit Roland Juno-106 SysEx on preset change ---
+  // --- Emit MIDI on preset change ---
   if (mSendPresetSysEx.exchange(false, std::memory_order_acquire))
   {
-    // APR (All Parameter): F0 41 30 0n pp [16 sliders] [sw1] [sw2] F7
-    // Total: 4 header + 1 patch + 16 sliders + 2 switches + 1 EOX = 24 bytes
-    uint8_t apr[24];
-    apr[0] = 0xF0;
-    apr[1] = 0x41;
-    apr[2] = 0x30;             // APR command (bank/patch change)
-    apr[3] = 0x00;             // channel
-    apr[4] = static_cast<uint8_t>(mCurrentPreset & 0x7F); // patch number
-
-    // 16 slider bytes (CC 0x00-0x0F order)
-    for (int cc = 0; cc < 16; cc++)
-      apr[5 + cc] = static_cast<uint8_t>(juce::roundToInt(getParamValue(kSysExToParam[cc]) * 127.f));
-
-    // Switches 1 (byte 21)
+    if (mMidiOutSysEx)
     {
-      int oct = juce::roundToInt(getParamValue(kOctTranspose));
-      uint8_t sw1 = 0;
-      if (oct == 2) sw1 |= 0x04;
-      else if (oct == 1) sw1 |= 0x02;
-      else sw1 |= 0x01;
-      if (getParamValue(kDcoPulse) > 0.5f) sw1 |= 0x08;
-      if (getParamValue(kDcoSaw) > 0.5f)   sw1 |= 0x10;
-      bool chorusI  = getParamValue(kChorusI)  > 0.5f;
-      bool chorusII = getParamValue(kChorusII) > 0.5f;
-      if (!chorusI && !chorusII) sw1 |= 0x20;
-      if (chorusI) sw1 |= 0x40;
-      apr[21] = sw1;
-    }
+      // SysEx mode: APR (All Parameter Report), matches real Juno-106
+      // F0 41 30 0n pp [16 sliders] [sw1] [sw2] F7 = 24 bytes
+      uint8_t apr[24];
+      apr[0] = 0xF0;
+      apr[1] = 0x41;
+      apr[2] = 0x30;             // APR command
+      apr[3] = 0x00;             // channel
+      apr[4] = static_cast<uint8_t>(mCurrentPreset & 0x7F);
 
-    // Switches 2 (byte 22)
+      for (int cc = 0; cc < 16; cc++)
+        apr[5 + cc] = static_cast<uint8_t>(juce::roundToInt(getParamValue(kSysExToParam[cc]) * 127.f));
+
+      {
+        int oct = juce::roundToInt(getParamValue(kOctTranspose));
+        uint8_t sw1 = 0;
+        if (oct == 2) sw1 |= 0x04;
+        else if (oct == 1) sw1 |= 0x02;
+        else sw1 |= 0x01;
+        if (getParamValue(kDcoPulse) > 0.5f) sw1 |= 0x08;
+        if (getParamValue(kDcoSaw) > 0.5f)   sw1 |= 0x10;
+        bool chorusI  = getParamValue(kChorusI)  > 0.5f;
+        bool chorusII = getParamValue(kChorusII) > 0.5f;
+        if (!chorusI && !chorusII) sw1 |= 0x20;
+        if (chorusI) sw1 |= 0x40;
+        apr[21] = sw1;
+      }
+
+      {
+        uint8_t sw2 = 0;
+        int pwm = juce::roundToInt(getParamValue(kPwmMode));
+        if (pwm == 0) sw2 |= 0x01;
+        if (getParamValue(kVcfEnvInv) > 0.5f) sw2 |= 0x02;
+        if (juce::roundToInt(getParamValue(kVcaMode)) == 0) sw2 |= 0x04;
+        int hpf = juce::roundToInt(getParamValue(kHpfFreq));
+        sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
+        apr[22] = sw2;
+      }
+
+      apr[23] = 0xF7;
+      midiOut.addEvent(apr, 24, 0);
+    }
+    else
     {
-      uint8_t sw2 = 0;
-      int pwm = juce::roundToInt(getParamValue(kPwmMode));
-      if (pwm == 0) sw2 |= 0x01;
-      if (getParamValue(kVcfEnvInv) > 0.5f) sw2 |= 0x02;
-      if (juce::roundToInt(getParamValue(kVcaMode)) == 0) sw2 |= 0x04;
-      int hpf = juce::roundToInt(getParamValue(kHpfFreq));
-      sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
-      apr[22] = sw2;
+      // CC mode: Program Change for preset selection
+      midiOut.addEvent(juce::MidiMessage::programChange(1, mCurrentPreset & 0x7F), 0);
     }
-
-    apr[23] = 0xF7;
-    midiOut.addEvent(apr, 24, 0);
   }
 
   // --- Merge outgoing MIDI into the host buffer ---
@@ -1296,6 +1317,9 @@ void KR106AudioProcessor::loadGlobalSettings()
   mMonoRetrigger = (bool)monoRetrig;
   mDSP.mMonoRetrigger = mMonoRetrigger;
 
+  auto midiSysEx = KR106PresetManager::getSetting("midiOutSysEx", false);
+  mMidiOutSysEx = (bool)midiSysEx;
+
   auto vcfOS = KR106PresetManager::getSetting("vcfOversample", 4);
   mVcfOversample = ((int)vcfOS == 2) ? 2 : 4;
   mDSP.ForEachVoice([this](kr106::Voice<float>& v) {
@@ -1337,6 +1361,7 @@ void KR106AudioProcessor::saveGlobalSettings()
   KR106PresetManager::saveSetting("arpSyncHost", mArpSyncHost);
   KR106PresetManager::saveSetting("lfoSyncHost", mLfoSyncHost);
   KR106PresetManager::saveSetting("monoRetrigger", mMonoRetrigger);
+  KR106PresetManager::saveSetting("midiOutSysEx", mMidiOutSysEx);
   KR106PresetManager::saveSetting("vcfOversample", mVcfOversample);
 
   // Save per-voice variance as flat array [v0p0, v0p1, ..., v9p5]
