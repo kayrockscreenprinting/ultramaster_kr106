@@ -34,103 +34,123 @@ enum EModulations
 // ============================================================
 namespace kr106 {
 
-// KR-106 4-position HPF switch (replicates the 4052 dual-switch network).
+// KR-106 HPF — per-model 4-position switch.
 //
-// Mode 0 (slider bottom): Low-shelf bass boost  ~+10 dB below ~150 Hz
-// Mode 1:                 Flat / bypass
-// Mode 2:                 1-pole HPF at ~240 Hz
-// Mode 3 (slider top):    1-pole HPF at ~720 Hz
+// J6:   4 samples of continuous pot curve (38.6-1394 Hz, PCHIP)
+// J60:  flat / 122 Hz / 269 Hz / 571 Hz (no bass boost)
+// J106: bass boost (+9.4 dB shelf @ 103 Hz) / flat / 236 Hz / 754 Hz
+//
+// Frequencies from circuit analysis + ngspice simulation (see KR106_HPF.h).
 struct HPF
 {
-  static constexpr float kShelfFreqHz  = 150.f;
-  static constexpr float kShelfGainLin = 3.162f; // ~+10 dB
-  static constexpr float kHPFFreqs[4] = { 0.f, 0.f, 240.f, 720.f };
-  static constexpr float kDCBlockHz = 5.f; // DC blocker cutoff for modes 0 & 1
+  static constexpr float kDCBlockHz = 5.f;
+  static constexpr int kXfadeSamples = 64; // ~1.5 ms at 44.1k
+  // J6 PCHIP curve sampled at 4 switch positions (0/3, 1/3, 2/3, 3/3)
+  static constexpr float kJ6Freqs[4] = { 38.6f, 260.f, 530.f, 1394.f };
 
-  int   mMode = 1;          // -1 = continuous (J6), 0-3 = switched (J106)
-  float mContinuousHz = 0.f; // J6 continuous cutoff
+  Model mModel = kJ106;
+  int   mMode = 1;          // 0-3 = switch position
+  float mFreqHz = 0.f;      // resolved HPF frequency for current mode (0 = flat, -1 = bass boost)
   float mSampleRate = 44100.f;
   float mG   = 0.f;
   float mHpS = 0.f;
-  float mLpS = 0.f;
   float mDcG = 0.f;  // DC blocker coefficient
   float mDcS = 0.f;  // DC blocker state
+  BassBoostFilter mBassBoost;
 
-  void Init()       { mHpS = 0.f; mLpS = 0.f; mDcS = 0.f; }
-  void SetSampleRate(float sr) { mSampleRate = sr; Recalc(); }
+  // Crossfade state for click-free mode switching
+  float mPrevFreqHz = 0.f;  // previous mode's freq (for crossfade)
+  float mPrevG = 0.f;       // previous mode's coefficient
+  float mPrevHpS = 0.f;     // previous mode's HPF state
+  float mPrevDcS = 0.f;     // previous mode's DC blocker state
+  BassBoostFilter mPrevBassBoost;
+  int   mXfadeCount = 0;    // samples remaining in crossfade (0 = inactive)
+
+  void Init()
+  {
+    mHpS = 0.f;
+    mDcS = 0.f;
+    mXfadeCount = 0;
+    mBassBoost.Init(mSampleRate);
+    mPrevBassBoost.Init(mSampleRate);
+  }
+
+  void SetSampleRate(float sr)
+  {
+    mSampleRate = sr;
+    mBassBoost.Init(mSampleRate);
+    mPrevBassBoost.Init(mSampleRate);
+    Recalc();
+  }
 
   void SetMode(int mode)
   {
     int newMode = std::clamp(mode, 0, 3);
-    if (newMode == mMode) return;
-    mMode = newMode;
-    mContinuousHz = 0.f;
-    Recalc();
-  }
+    float newFreqHz;
+    if (mModel == kJ6)
+      newFreqHz = kJ6Freqs[newMode];
+    else if (mModel == kJ60)
+      newFreqHz = getJuno60HPFFreq(newMode);
+    else
+      newFreqHz = getJuno106HPFFreq(newMode);
 
-  // J6 continuous mode: set HPF cutoff directly in Hz
-  void SetFreqHz(float hz)
-  {
-    mMode = -1; // continuous mode (not a 4-position switch)
-    mContinuousHz = hz;
+    if (newFreqHz != mFreqHz)
+    {
+      // Snapshot current state for crossfade
+      mPrevFreqHz = mFreqHz;
+      mPrevG = mG;
+      mPrevHpS = mHpS;
+      mPrevDcS = mDcS;
+      mPrevBassBoost = mBassBoost;
+      mXfadeCount = kXfadeSamples;
+    }
+
+    mMode = newMode;
+    mFreqHz = newFreqHz;
     Recalc();
   }
 
   void Recalc()
   {
-    // DC blocker (~5 Hz) — always computed, used in modes 0 & 1
+    // DC blocker (~5 Hz)
     float dcFrq = std::clamp(kDCBlockHz / (mSampleRate * 0.5f), 0.001f, 0.9f);
     mDcG = tanf(dcFrq * static_cast<float>(M_PI) * 0.5f);
 
-    if (mMode == -1)
-    {
-      // J6 continuous mode
-      float frq = std::clamp(mContinuousHz / (mSampleRate * 0.5f), 0.001f, 0.9f);
-      mG = tanf(frq * static_cast<float>(M_PI) * 0.5f);
-      return;
-    }
-    if (mMode == 1) { mG = 0.f; return; }
-    float fc = (mMode == 0) ? kShelfFreqHz : kHPFFreqs[mMode];
-    float frq = std::clamp(fc / (mSampleRate * 0.5f), 0.001f, 0.9f);
+    if (mFreqHz <= 0.f) { mG = 0.f; return; } // flat or bass boost
+    float frq = std::clamp(mFreqHz / (mSampleRate * 0.5f), 0.001f, 0.9f);
     mG = tanf(frq * static_cast<float>(M_PI) * 0.5f);
   }
 
   // 1-pole DC blocker: subtract LP at ~5 Hz
-  float DCBlock(float input)
+  float DCBlock(float input, float& dcState)
   {
-    float v = (input - mDcS) * mDcG / (1.f + mDcG);
-    float lp = mDcS + v;
-    mDcS = lp + v;
+    float v = (input - dcState) * mDcG / (1.f + mDcG);
+    float lp = dcState + v;
+    dcState = lp + v;
+    return input - lp;
+  }
+
+  float ProcessWith(float input, float freqHz, float g, float& hpState, float& dcState, BassBoostFilter& boost)
+  {
+    if (freqHz < 0.f) return boost.Process(input);
+    if (freqHz == 0.f) return DCBlock(input, dcState);
+    float v = (input - hpState) * g / (1.f + g);
+    float lp = hpState + v;
+    hpState = lp + v;
     return input - lp;
   }
 
   float Process(float input)
   {
-    // DC blocker disabled: oscillators are bipolar with no DC offset,
-    // and the hardware's NP 10µF/16V coupling cap between DCO and VCF
-    // is implicitly modeled by the absence of DC bias. The VCF's OTA
-    // stages could theoretically generate trace DC from asymmetric
-    // saturation, but it's inaudible and not worth the cost.
-    if (mMode == -1)
+    float out = ProcessWith(input, mFreqHz, mG, mHpS, mDcS, mBassBoost);
+    if (mXfadeCount > 0)
     {
-      // J6 continuous HPF: 1-pole high-pass
-      float v = (input - mHpS) * mG / (1.f + mG);
-      float lp = mHpS + v;
-      mHpS = lp + v;
-      return input - lp;
+      float prev = ProcessWith(input, mPrevFreqHz, mPrevG, mPrevHpS, mPrevDcS, mPrevBassBoost);
+      float t = static_cast<float>(mXfadeCount) / static_cast<float>(kXfadeSamples);
+      out = out * (1.f - t) + prev * t;
+      mXfadeCount--;
     }
-    if (mMode == 1) return DCBlock(input);
-    if (mMode == 0)
-    {
-      float v = (input - mLpS) * mG / (1.f + mG);
-      float lp = mLpS + v;
-      mLpS = lp + v;
-      return DCBlock(input + (kShelfGainLin - 1.f) * lp);
-    }
-    float v = (input - mHpS) * mG / (1.f + mG);
-    float lp = mHpS + v;
-    mHpS = lp + v;
-    return input - lp;
+    return out;
   }
 };
 
@@ -427,6 +447,7 @@ public:
     mUnisonNote = -1;
     mUnisonStack.clear();
     mRoundRobinNext = 0;
+    mHPF.mModel = mSynthModel;
     mHPF.SetSampleRate(mSampleRate);
     mHPF.Init();
     mHPF.SetMode(1);

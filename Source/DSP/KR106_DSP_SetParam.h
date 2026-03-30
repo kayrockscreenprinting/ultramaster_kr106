@@ -209,6 +209,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
         v.mOsc.mPulseInvert = (mSynthModel == kr106::kJ106);
       });
       mLFO.mModel = mSynthModel;
+      mHPF.mModel = mSynthModel;
       SetParam(kEnvA, mSliderA);
       SetParam(kEnvD, mSliderD);
       SetParam(kEnvR, mSliderR);
@@ -223,6 +224,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       SetParam(kDcoSub, mSliderDcoSub);
       SetParam(kDcoNoise, mSliderDcoNoise);
       SetParam(kVcaLevel, mSliderVcaLevel);
+      SetParam(kHpfFreq, mSliderHpf);
       break;
     }
     case kBender:

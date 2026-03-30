@@ -325,7 +325,7 @@ KR106AudioProcessor::KR106AudioProcessor()
 
   // HPF (4-position switch)
   SFV fmtHpf = [](float v, int) -> juce::String {
-    constexpr const char* labels[] = { "Bass Boost", "Flat", "240 Hz", "720 Hz" };
+    constexpr const char* labels[] = { "Bass Boost", "Flat", "236 Hz", "754 Hz" };
     return juce::String(labels[juce::jlimit(0, 3, juce::roundToInt(v))]);
   };
   addSlider(kHpfFreq,    "HPF",         1.f, 0.f, 3.f, fmtHpf);
@@ -1117,6 +1117,17 @@ void KR106AudioProcessor::parameterChanged(int paramIdx, float newValue)
         auto targetFn = toJ106 ? std::function<float(float)>(j106Hz)
                                 : std::function<float(float)>(j60Hz);
         mParams[kVcfFreq]->setValueNotifyingHost(remap(srcHz, targetFn));
+      }
+
+      // HPF: remap positions across models
+      // J106 pos 0/1 (boost/flat) -> J60 pos 0 (flat)
+      // J60 pos 0 (flat) -> J106 pos 1 (flat, not boost)
+      {
+        int hpf = juce::roundToInt(getParamValue(kHpfFreq));
+        if (!toJ106 && hpf <= 1)
+          mParams[kHpfFreq]->setValueNotifyingHost(0.f / 3.f);
+        else if (toJ106 && hpf == 0)
+          mParams[kHpfFreq]->setValueNotifyingHost(1.f / 3.f);
       }
     }
 
