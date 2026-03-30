@@ -501,7 +501,7 @@ public:
   int mRoundRobinNext = 0;
   bool mChorusI = false;
   bool mChorusII = false;
-  int mAdsrMode = 0;
+  int mSynthModel = 0;
   float mSliderA = 0.25f;
   float mSliderD = 0.25f;
   float mSliderR = 0.25f;
@@ -514,6 +514,9 @@ public:
   float mSliderVcfEnv = 0.f;
   float mSliderVcfKbd = 0.f;
   float mSliderBenderVcf = 0.f;
+  float mSliderDcoSub = 1.f;
+  float mSliderDcoNoise = 0.f;
+  float mSliderVcaLevel = 0.5f;
   float mSliderHpf = 1.f; // default = Flat (mode 1)
 
   std::bitset<128> mHeldNotes;

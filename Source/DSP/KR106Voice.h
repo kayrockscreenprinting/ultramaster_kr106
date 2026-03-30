@@ -37,11 +37,12 @@ public:
   // Voice parameters (set by KR106DSP::SetParam via ForEachVoice)
   float mDcoLfo       = 0.f;
   float mDcoPwm       = 0.f;
-  float mDcoSub       = 1.f;
-  float mDcoNoise     = 0.f;
-  float mVcfFreq      = 700.f; // Hz (J6 classic mode)
-  float mVcfFreqJ106  = 700.f; // Hz (J106-compatible mode)
-  bool  mJ6Mode = false;       // true = J6 mode (analog VCF curve + C1 KBD ref)
+  float mDcoSub       = 0.95080f; // pre-computed from dcoSubLevel_j6(1.0)
+  float mDcoNoise     = 0.f;     // pre-computed from dcoNoiseLevel_j6()
+  float mVcfFreq      = 700.f; // Hz (J6 mode)
+  float mVcfFreqJ60   = 700.f; // Hz (J60 mode)
+  float mVcfFreqJ106  = 700.f; // Hz (J106 mode)
+  Model mModel = kJ106;
   float mVcfRes       = 0.f;
   float mVcfEnv       = 0.f;
   float mVcfLfo       = 0.f;
@@ -260,6 +261,48 @@ public:
     return t * kMaxSemitones;
   }
 
+  // vcfEnvDepth6() - Maps normalized VCF ENV MOD slider (0..1) to
+  // modulation depth in log-frequency space (natural log units).
+  //
+  // CLEAN ROOM IMPLEMENTATION: Derived from hardware measurements on a
+  // real Juno-6. VCF cutoff Hz measured at 11 slider positions with
+  // sustain at full (envelope = 1.0), two overlapping measurement sets
+  // stitched at slider 0.5. Base VCF freq calibrated to isolate the
+  // env mod contribution.
+  //
+  // Circuit: A10K log taper pot scaling the envelope CV before the
+  // IC9 summing node. The pot taper suppresses the low end (3.9 st at
+  // slider 0.1) and compresses the top (step halves from 0.9 to 1.0).
+  // Knee at ~10% rotation, then roughly linear 0.2-0.9.
+  //
+  // At full depth (t=1.0), the envelope sweeps 10.6 octaves (127 st).
+  // The value is added directly to log(vcfBaseHz) before exp().
+  //
+  //   slider  Hz(base=110)  log_depth  octaves
+  //   0.0         110       0.000        0.0
+  //   0.1         138       0.227        0.3
+  //   0.2         335       1.114        1.6
+  //   0.3         800       1.984        2.9
+  //   0.4        1600       2.677        3.9
+  //   0.5        3680       3.510        5.1
+  //   0.6        7854       4.268        6.2
+  //   0.7       19215       5.163        7.4
+  //   0.8        2570*      6.064        8.7
+  //   0.9        6084*      6.925       10.0
+  //   1.0        9260*      7.345       10.6
+  //   (* set 2, base=200 Hz, stitched via shared f(0.5) calibration)
+  static float vcfEnvDepth6(float t)
+  {
+    static constexpr float kTable[11] = {
+      0.f, 0.227f, 1.114f, 1.984f, 2.677f, 3.510f,
+      4.268f, 5.163f, 6.064f, 6.925f, 7.345f
+    };
+    float idx = t * 10.f;
+    int i0 = std::min(static_cast<int>(idx), 9);
+    float frac = idx - i0;
+    return kTable[i0] + frac * (kTable[i0 + 1] - kTable[i0]);
+  }
+
   // dcoLfoDepth106() - Maps normalized DCO LFO depth slider (0..1) to
   // peak pitch deviation in semitones (±4 st = ±400 cents at max).
   //
@@ -389,6 +432,103 @@ public:
     return coeff * 238.1f / 256.f;
   }
 
+  // dcoSubLevel_j6() - Maps Juno-6 DCO Sub slider (0..1) to linear gain.
+  // From hardware measurements (docs/J6_MEASUREMENTS/SUB_OSC.csv):
+  //   dB relative to saw/pulse at each slider position (0-10).
+  // Table stores linear gain values (10^(dB/20)), normalized so that
+  // slider=10 produces the measured +1.5 dB relative to saw when combined
+  // with kSubAmp/kSawAmp (0.625/0.5 = +1.94 dB). Net effect at max:
+  // subLevel * kSubAmp/kSawAmp = +1.5 dB, so subLevel(10) = 10^(-0.44/20).
+  static float dcoSubLevel_j6(float t)
+  {
+    static constexpr float kTable[11] = {
+      0.00271f,   // 0: -49.4 dB (effectively silent)
+      0.00271f,   // 1: -49.4 dB
+      0.02388f,   // 2: -30.5 dB
+      0.05534f,   // 3: -23.2 dB
+      0.09186f,   // 4: -18.8 dB
+      0.14394f,   // 5: -14.9 dB
+      0.19638f,   // 6: -12.2 dB
+      0.41985f,   // 7: -5.6 dB
+      0.63546f,   // 8: -2.0 dB
+      0.83771f,   // 9:  +0.4 dB
+      0.95080f    // 10: +1.5 dB (net +1.5 dB with kSubAmp/kSawAmp)
+    };
+    float idx = t * 10.f;
+    int i0 = std::min(static_cast<int>(idx), 9);
+    float frac = idx - i0;
+    return kTable[i0] + frac * (kTable[i0 + 1] - kTable[i0]);
+  }
+
+  // dcoSubLevel_j60() - J60 sub level: linear pot + linear circuit.
+  // The J6 nonlinearity comes entirely from the A-taper pot. The J60 uses
+  // a 50KB linear pot, and the downstream circuit (inverting amp + transistor
+  // shunt + diode) is essentially linear. Scaled to match J6 max level.
+  // TODO: verify with J60 hardware measurements.
+  static float dcoSubLevel_j60(float t)
+  {
+    return t * 0.95080f; // linear, scaled to match J6 max (+1.5 dB net)
+  }
+
+  // dcoSubLevel_j106() - J106 sub level: no ROM table, straight DAC output.
+  // Same transistor shunt circuit as J60. Linear.
+  static float dcoSubLevel_j106(float t)
+  {
+    return t * 0.95080f; // linear, scaled to match J6 max (+1.5 dB net)
+  }
+
+  // dcoNoiseLevel_j6() - Maps Juno-6 DCO Noise slider (0..1) to linear gain.
+  // From hardware measurements (docs/J6_MEASUREMENTS/NOISE.csv).
+  // J6 noise CV circuit: A-taper pot (54K) -> collector 31.8K +/- 25K (trim),
+  // no pulldown to -15V. The A-taper pot provides most of the curve;
+  // downstream circuit is similar to J60 but lower collector R.
+  // Different curve than sub -- more gradual taper, no dead zone at slider 1.
+  // Noise is mixed directly (no kNoiseAmp constant), so the table values are
+  // absolute linear gains relative to saw * kSawAmp.
+  static float dcoNoiseLevel_j6(float t)
+  {
+    static constexpr float kTable[11] = {
+      0.0f,       // 0: -inf
+      0.00748f,   // 1: -36.5 dB
+      0.02286f,   // 2: -26.8 dB
+      0.03083f,   // 3: -24.2 dB
+      0.04159f,   // 4: -21.6 dB
+      0.05058f,   // 5: -19.9 dB
+      0.05546f,   // 6: -19.1 dB
+      0.10327f,   // 7: -13.7 dB
+      0.15100f,   // 8: -10.4 dB
+      0.25643f,   // 9: -5.8 dB
+      0.50000f    // 10: 0 dB (= kSawAmp, unity relative to saw)
+    };
+    float idx = t * 10.f;
+    int i0 = std::min(static_cast<int>(idx), 9);
+    float frac = idx - i0;
+    return kTable[i0] + frac * (kTable[i0 + 1] - kTable[i0]);
+  }
+
+  // dcoNoiseLevel_j60() - J60 noise level: linear pot + PNP transistor circuit.
+  // 50KB linear pot -> DAC 0-6V -> 50K trim + 6.8K -> PNP 2SA1015 (base GND) -> BA662.
+  // Collector: 50K trim + 6.8K (~7K-57K), no pulldown. CV range 0-6V.
+  // The BA662 is linear; the PNP transistor gives the curve.
+  // FIXME: model PNP 2SA1015 transistor curve (Vbe threshold + emitter
+  // degeneration from trim pot). Using AudioTaper as placeholder -- it's an
+  // exponential in the right ballpark, but not derived from the actual circuit.
+  static float dcoNoiseLevel_j60(float t)
+  {
+    static const float kScale = 1.f / (std::exp(3.f) - 1.f);
+    return (std::exp(3.f * t) - 1.f) * kScale * 0.50000f;
+  }
+
+  // dcoNoiseLevel_j106() - J106 noise level: same PNP + BA662 circuit as J60.
+  // Collector: 2.26M +/- 50K (trim) to signal, 2.2M to -15V. CV range 0-10V.
+  // Much higher collector R and wider CV range than J60 -- expect steeper curve.
+  // FIXME: model actual transistor curve; using AudioTaper placeholder.
+  static float dcoNoiseLevel_j106(float t)
+  {
+    static const float kScale = 1.f / (std::exp(3.f) - 1.f);
+    return (std::exp(3.f * t) - 1.f) * kScale * 0.50000f;
+  }
+
   void UpdatePortaCoeff()
   {
     // portaRate() returns semitones/sec; convert to octaves/sample
@@ -461,7 +601,7 @@ public:
     // In J106 mode, NoteOn calls Tick106() internally for the immediate
     // first attack step. Snap the RC smoothers to the post-attack value
     // so the envelope and VCF start immediately at the right level.
-    if (!mADSR.mJ6Mode)
+    if (mModel == kJ106)
     {
       mFwEnvNext = mADSR.mEnvNext;
       // Don't snap mFwEnvSmooth — let the 1ms RC filter smooth the onset,
@@ -542,7 +682,7 @@ public:
     T* lfoRawBuffer = (nInputs > 1 && inputs[1]) ? inputs[1] : nullptr;
     // Shared noise source (index 2)
     T* noiseBuffer = (nInputs > 2 && inputs[2]) ? inputs[2] : nullptr;
-    float noiseAT = (noiseBuffer && mDcoNoise > 0.f) ? OscillatorsWT::AudioTaper(mDcoNoise) : 0.f;
+    float noiseAT = (noiseBuffer && mDcoNoise > 0.f) ? mDcoNoise : 0.f;
 
     for (int i = startIdx; i < startIdx + nFrames; i++)
     {
@@ -559,7 +699,7 @@ public:
       float lfo = lfoBuffer ? static_cast<float>(lfoBuffer[i]) : 0.f;
       float env;
 
-      if (mADSR.mJ6Mode)
+      if (mModel != kJ106)
       {
         env = mADSR.Process();
       }
@@ -620,20 +760,23 @@ public:
 
       // --- VCF frequency calculation ---
       float vcfCPS;
-      if (mADSR.mJ6Mode)
+      if (mModel != kJ106)
       {
         static constexpr float kEnvScale = 6.931f;
         static constexpr float kEnvInvScale = 7.766f;
         static constexpr float kSemiToLogFreq = 0.05776f;
 
         float envScale = (mVcfEnvInvert > 0) ? kEnvScale : kEnvInvScale;
-        float vcfBaseHz = mJ6Mode ? mVcfFreq : mVcfFreqJ106;
-        float kbdRef    = mJ6Mode ? 32.703f  : 261.626f;
+        float vcfBaseHz = (mModel == kJ106) ? mVcfFreqJ106
+                        : (mModel == kJ60) ? mVcfFreqJ60
+                        : mVcfFreq; // J6
+        // J6: KBD tracks from C1 (32.7 Hz). J60 and J106: from C4 (261.6 Hz).
+        float kbdRef    = (mModel == kJ6) ? 32.703f : 261.626f;
         float vcfFrq = logf(vcfBaseHz) + mVcfFreqOffset;
 
         // J6: KBD tracking sees the pitch CV (octave switch + portamento)
         // but not LFO or pitch bend. Bend modulates the VCF separately
-        // (line 608) — the KBD tracking tap is before the bender summing point.
+        // (line 608) -- the KBD tracking tap is before the bender summing point.
         float kbdPitch = mOctTranspose / 12.f + mPitchOffset;
         float kbdFreq = baseFreq * powf(2.f, kbdPitch);
         vcfFrq += logf(kbdFreq / kbdRef) * mVcfKbd;
@@ -653,9 +796,8 @@ public:
       // --- Oscillator (1x) + oversampled VCF ---
       // Wavetable oscillator is bandlimited by construction, runs at base rate.
       // VCF handles its own upsampling/downsampling internally.
-      float subAT = OscillatorsWT::AudioTaper(mDcoSub);
       bool sync = false;
-      float oscOut = mOsc.Process(cps, pw, mSawOn, mPulseOn, mSubOn, subAT, 0.f, sync);
+      float oscOut = mOsc.Process(cps, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, 0.f, sync);
 
       // Noise mixed from shared source (single generator, matches hardware)
       if (noiseAT > 0.f)

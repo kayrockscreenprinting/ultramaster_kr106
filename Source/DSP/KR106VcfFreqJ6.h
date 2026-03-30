@@ -51,4 +51,32 @@ inline float j6_vcf_freq_from_slider(float s)
   return f;
 }
 
+// Juno-60 VCF frequency slider model.
+//
+// Same IR3109 expo converter as J6, but different front end:
+//   - 50KB linear pot, no 100K series resistor (no loading sag)
+//   - KBD tracking referenced from C4 (261.6 Hz), not C1 (32.7 Hz)
+//   - Calibration: slider 0.3 = 248 Hz (from J60 service manual)
+//
+// Simple exponential: f = 28 * exp(7.262 * slider)
+//   slider 0 = 28 Hz, slider 0.3 = 248 Hz, slider 1 = ~40 kHz
+// The narrower low-end range (28 Hz vs J6's 4 Hz) reflects the higher
+// C4 reference point. Same IR3109 saturation clamp above 20 kHz.
+
+inline float j60_vcf_freq_from_slider(float s)
+{
+  static constexpr float kBase = 28.f;
+  static constexpr float kScale = 7.262f;
+  float f = kBase * expf(kScale * s);
+
+  // Same IR3109 expo converter saturation as J6/J106
+  static constexpr float kThresh = 20000.f;
+  static constexpr float kCeil   = 40000.f;
+  static constexpr float kRange  = kCeil - kThresh;
+  if (f > kThresh)
+    f = kThresh + kRange * tanhf((f - kThresh) / kRange);
+
+  return f;
+}
+
 } // namespace kr106

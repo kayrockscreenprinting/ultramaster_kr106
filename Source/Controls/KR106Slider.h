@@ -343,19 +343,19 @@ private:
 };
 
 // HPF slider: draws tick marks, snaps to 4 positions in J106 mode.
-// In J6 mode (mAdsrMode == 0), behaves as a continuous slider.
+// In J6 mode (mSynthModel == 0), behaves as a continuous slider.
 class KR106HPFSlider : public KR106Slider
 {
 public:
   KR106HPFSlider(juce::RangedAudioParameter* param, KR106Tooltip* tip,
-                 const juce::Image& handleImg, int* adsrMode)
-    : KR106Slider(param, tip, handleImg), mAdsrMode(adsrMode) {}
+                 const juce::Image& handleImg, int* synthModel)
+    : KR106Slider(param, tip, handleImg), mSynthModel(synthModel) {}
 
   void paintTickMarks(juce::Graphics& g) override
   {
     auto bright = juce::Colour(219, 219, 219);
     auto dim    = juce::Colour(126, 126, 126);
-    if (mAdsrMode && *mAdsrMode == 0)
+    if (mSynthModel && *mSynthModel == 0)
     {
       // J6: 11 tick marks (same as base class default)
       KR106Slider::paintTickMarks(g);
@@ -377,7 +377,7 @@ public:
   {
     KR106Slider::mouseDrag(e);
     // In J106 mode, snap to 4 positions (0, 1/3, 2/3, 1)
-    if (mAdsrMode && *mAdsrMode != 0 && mParam)
+    if (mSynthModel && *mSynthModel != 0 && mParam)
     {
       float val = mParam->getValue();
       float snapped = std::round(val * 3.f) / 3.f;
@@ -392,7 +392,7 @@ public:
   void mouseUp(const juce::MouseEvent& e) override
   {
     // Snap on release too for clean final position
-    if (mAdsrMode && *mAdsrMode != 0 && mParam)
+    if (mSynthModel && *mSynthModel != 0 && mParam)
     {
       float val = mParam->getValue();
       float snapped = std::round(val * 3.f) / 3.f;
@@ -403,7 +403,7 @@ public:
   }
 
 private:
-  int* mAdsrMode = nullptr;
+  int* mSynthModel = nullptr;
 };
 
 // Arp Rate slider: when DAW sync is enabled, draws tick marks for note

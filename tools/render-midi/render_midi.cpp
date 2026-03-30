@@ -296,9 +296,9 @@ static void decodeSwitches1(KR106DSP<float>& dsp, uint8_t val)
 
 static void decodeSwitches2(KR106DSP<float>& dsp, uint8_t val)
 {
-    setParam(dsp, kPwmMode, (val & 0x01) ? 0.f : 1.f);
+    setParam(dsp, kPwmMode, (val & 0x01) ? 1.f : 0.f); // bit=1 is MAN/ENV
     setParam(dsp, kVcfEnvInv, (val & 0x02) ? 1.f : 0.f);
-    setParam(dsp, kVcaMode, (val & 0x04) ? 0.f : 1.f);
+    setParam(dsp, kVcaMode, (val & 0x04) ? 1.f : 0.f); // bit=1 is GATE
     int hpf = 3 - ((val >> 3) & 0x03);
     setParam(dsp, kHpfFreq, static_cast<float>(hpf));
 }

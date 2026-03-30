@@ -83,7 +83,7 @@ struct LFO
   bool mWasActive   = false;
   int mMode         = 0;     // 0=auto, 1=manual
   bool mTrigger     = false; // manual trigger state
-  bool mJ6Mode      = false; // true = Juno-6, false = Juno-106
+  Model mModel      = kJ106;
 
   // DAW sync state (set by processor each block)
   bool mSyncToHost   = false;
@@ -98,7 +98,7 @@ struct LFO
   bool  mInHoldoff        = false;
   float mSlider           = 0.f; // stored slider value for reset
 
-  float lfoFreq(float t) { return mJ6Mode ? lfoFreqJ6(t) : lfoFreqJ106(t); }
+  float lfoFreq(float t) { return (mModel != kJ106) ? lfoFreqJ6(t) : lfoFreqJ106(t); }
 
   // LFO rate comparison (Hz) at slider positions 0–10:
   //
@@ -247,7 +247,7 @@ struct LFO
   void SetDelay(float slider)
   {
     mSlider = slider;
-    if (mJ6Mode)
+    if (mModel != kJ106)
     {
       mDelayParam = lfoDelayJ6(slider);
       RecalcDelayJ6();
@@ -291,7 +291,7 @@ struct LFO
       if (mMode == 1 || mAmp <= 0.f)
       {
         mAmp = 0.f;
-        if (mJ6Mode)
+        if (mModel != kJ106)
           RecalcDelayJ6();
         else
           RecalcDelay106();
@@ -306,7 +306,7 @@ struct LFO
 
     if (newState && mAmp < 1.f)
     {
-      if (mJ6Mode)
+      if (mModel != kJ106)
       {
         // J6: RC exponential envelope approaching 1.0 asymptotically
         if (mDelayCoeff <= 0.f)

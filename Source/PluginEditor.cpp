@@ -120,7 +120,7 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
     addSlider(kDcoNoise, new KR106Slider(param(kDcoNoise), tip, sliderHdl), 445, 33, 19, 49);
 
     // === HPF SECTION ===
-    { auto* s = new KR106HPFSlider(param(kHpfFreq), tip, sliderHdl, &p.mDSP.mAdsrMode);
+    { auto* s = new KR106HPFSlider(param(kHpfFreq), tip, sliderHdl, &p.mDSP.mSynthModel);
       s->setMidiLearn(&p, kHpfFreq);
       add(s, 470, 33, 19, 49); }
 
@@ -233,7 +233,7 @@ void KR106Editor::showSettingsMenu()
     items.push_back(KR106MenuItem::item(24, "Sync Arp to Host",      true, mProcessor.mArpSyncHost));
     items.push_back(KR106MenuItem::item(25, "Sync LFO to Host",      true, mProcessor.mLfoSyncHost));
     items.push_back(KR106MenuItem::item(22, "Mono Retrigger",        true, mProcessor.mMonoRetrigger));
-    items.push_back(KR106MenuItem::item(26, "MIDI Out: SysEx",       true, mProcessor.mMidiOutSysEx));
+    items.push_back(KR106MenuItem::item(26, "MIDI SysEx",       true, mProcessor.mMidiOutSysEx));
     items.push_back(KR106MenuItem::sep());
     items.push_back(KR106MenuItem::makeAction(40, "Component Variance Editor"));
     items.push_back(KR106MenuItem::makeAction(41, "Keyboard Shortcuts"));
@@ -252,47 +252,31 @@ void KR106Editor::showSettingsMenu()
                 else
                     setTransform(juce::AffineTransform::scale(s));
             }
+            // Voice count and oversample: set via parameter system
             int voices = r == 10 ? 6 : r == 11 ? 8 : r == 12 ? 10 : 0;
             if (voices > 0 && voices != mProcessor.mVoiceCount)
             {
-                mProcessor.mVoiceCount = voices;
-                mProcessor.mDSP.SetActiveVoices(voices);
-            }
-            if (r == 20)
-            {
-                mProcessor.mIgnoreVelocity = !mProcessor.mIgnoreVelocity;
-                mProcessor.mDSP.mIgnoreVelocity = mProcessor.mIgnoreVelocity;
-            }
-            if (r == 21)
-            {
-                mProcessor.mArpLimitKbd = !mProcessor.mArpLimitKbd;
-                mProcessor.mDSP.mArp.mLimitToKeyboard = mProcessor.mArpLimitKbd;
-            }
-            if (r == 24)
-            {
-                mProcessor.mArpSyncHost = !mProcessor.mArpSyncHost;
-            }
-            if (r == 25)
-            {
-                mProcessor.mLfoSyncHost = !mProcessor.mLfoSyncHost;
-            }
-            if (r == 22)
-            {
-                mProcessor.mMonoRetrigger = !mProcessor.mMonoRetrigger;
-                mProcessor.mDSP.mMonoRetrigger = mProcessor.mMonoRetrigger;
-            }
-            if (r == 26)
-            {
-                mProcessor.mMidiOutSysEx = !mProcessor.mMidiOutSysEx;
+                auto* p = mProcessor.getParam(kSettingVoices);
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(voices)));
             }
             int newOS = r == 30 ? 2 : r == 31 ? 4 : 0;
             if (newOS > 0 && newOS != mProcessor.mVcfOversample)
             {
-                mProcessor.mVcfOversample = newOS;
-                mProcessor.mDSP.ForEachVoice([newOS](kr106::Voice<float>& v) {
-                    v.mVCF.SetOversample(newOS);
-                });
+                auto* p = mProcessor.getParam(kSettingOversample);
+                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(newOS)));
             }
+            // Bool settings: toggle via parameter system
+            auto toggleBoolParam = [this](int paramIdx) {
+                auto* p = mProcessor.getParam(paramIdx);
+                float cur = p->getValue();
+                p->setValueNotifyingHost(cur > 0.5f ? 0.f : 1.f);
+            };
+            if (r == 20) toggleBoolParam(kSettingIgnoreVel);
+            if (r == 21) toggleBoolParam(kSettingArpLimitKbd);
+            if (r == 24) toggleBoolParam(kSettingArpSync);
+            if (r == 25) toggleBoolParam(kSettingLfoSync);
+            if (r == 22) toggleBoolParam(kSettingMonoRetrig);
+            if (r == 26) toggleBoolParam(kSettingMidiSysEx);
             if (r == 40)
             {
                 mSettingsMenu.reset();

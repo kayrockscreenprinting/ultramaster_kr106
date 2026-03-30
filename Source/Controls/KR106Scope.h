@@ -529,7 +529,7 @@ private:
         if (!mProcessor) return;
 
         auto& dsp = mProcessor->mDSP;
-        bool j6 = (dsp.mAdsrMode == 0);
+        bool j6 = (dsp.mSynthModel == 0);
         float sustain = std::max(mProcessor->getParam(kEnvS)->getValue(), 0.001f);
 
         static constexpr float kAttackTarget  = 1.2f;
@@ -546,8 +546,8 @@ private:
         if (j6)
         {
             float attackTau  = 0.001500f * expf(11.7382f * dsp.mSliderA - 4.7207f * dsp.mSliderA * dsp.mSliderA);
-            float decayTau   = 0.003577f * expf(12.9460f * dsp.mSliderD - 5.0638f * dsp.mSliderD * dsp.mSliderD);
-            float releaseTau = 0.003577f * expf(12.9460f * dsp.mSliderR - 5.0638f * dsp.mSliderR * dsp.mSliderR);
+            float decayTau   = kr106::ADSR::DecRelTauJ6(dsp.mSliderD);
+            float releaseTau = kr106::ADSR::DecRelTauJ6(dsp.mSliderR);
 
             attackCoeff  = 1.f - expf(-0.001f / attackTau);
             decayCoeff   = 1.f - expf(-0.001f / decayTau);
@@ -737,7 +737,7 @@ private:
         if (!mProcessor) return;
 
         auto& dsp = mProcessor->mDSP;
-        bool j106 = (dsp.mAdsrMode != 0);
+        bool j106 = (dsp.mSynthModel != 0);
 
         float slider = dsp.mSliderVcfFreq;
         float fc;
@@ -1258,13 +1258,13 @@ private:
             h = fbits(dsp.mSliderA) ^ (static_cast<uint64_t>(fbits(dsp.mSliderD)) << 16)
               ^ (static_cast<uint64_t>(fbits(dsp.mSliderR)) << 32)
               ^ (static_cast<uint64_t>(fbits(mProcessor->getParam(kEnvS)->getValue())) << 8)
-              ^ static_cast<uint64_t>(dsp.mAdsrMode);
+              ^ static_cast<uint64_t>(dsp.mSynthModel);
         }
         else // VCF (mScaleIdx == 3)
         {
             h = fbits(dsp.mSliderVcfFreq)
               ^ (static_cast<uint64_t>(fbits(mProcessor->getParam(kVcfRes)->getValue())) << 32)
-              ^ static_cast<uint64_t>(dsp.mAdsrMode);
+              ^ static_cast<uint64_t>(dsp.mSynthModel);
         }
 
         if (h != mParamHash)

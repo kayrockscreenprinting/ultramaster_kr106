@@ -22,6 +22,15 @@ enum EParams
   kTransposeOffset, kBenderLfo,
   kAdsrMode,
   kMasterVol,
+  // Settings (exposed as params for headless LV2 hosts)
+  kSettingVoices,       // 6, 8, or 10
+  kSettingOversample,   // 2 or 4
+  kSettingIgnoreVel,    // bool
+  kSettingArpLimitKbd,  // bool
+  kSettingArpSync,      // bool
+  kSettingLfoSync,      // bool
+  kSettingMonoRetrig,   // bool
+  kSettingMidiSysEx,    // bool
   kNumParams
 };
 
@@ -151,7 +160,7 @@ private:
   std::atomic<int> mUIMidiTail{0};
 
   int mCurrentPreset = 0;  // 0-127 within current bank
-  int presetBankOffset() const { return (mDSP.mAdsrMode == 0) ? 0 : 128; }
+  int presetBankOffset() const { return (mDSP.mSynthModel == 0) ? 0 : 128; }
   int absPresetIndex() const { return mCurrentPreset + presetBankOffset(); }
 
   // Flag: emit SysEx dump for current preset values on next processBlock

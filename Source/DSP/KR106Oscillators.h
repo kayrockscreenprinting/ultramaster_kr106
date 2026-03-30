@@ -148,6 +148,10 @@ static constexpr float kSawCurve = 0.00f;
   // sync: set true on phase wraparound (for scope sync output)
   // Audio taper: 50K pot emulation (exponential curve, same for sub + noise).
   // Call once per block at the voice level; pass the result to Process.
+  // J6 SUB OSC measurements (docs/J6_MEASUREMENTS/SUB_OSC.csv):
+  //   AudioTaper * kSubAmp/kSawAmp matches hardware within ~0.5 dB for slider 7-10.
+  //   Diverges at low settings: slider 1 is ~16 dB too loud (-33 vs -49 measured),
+  //   slider 2-5 are 2-3 dB too loud. Real pot has steeper cutoff at low end.
   static float AudioTaper(float x) {
     static const float kScale = 1.f / (std::exp(3.f) - 1.f);
     return (std::exp(3.f * x) - 1.f) * kScale;

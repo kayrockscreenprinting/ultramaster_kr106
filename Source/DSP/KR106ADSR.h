@@ -7,6 +7,8 @@
 
 namespace kr106 {
 
+enum Model { kJ6 = 0, kJ60 = 1, kJ106 = 2 };
+
 // Decay/release per-tick multiplier table (0.16 unsigned fixed-point).
 // Reproduces the D7811G ROM table (0D60_envDecRelTbl) structure:
 // piecewise linear, 7 segments with step sizes chosen so that key
@@ -32,13 +34,13 @@ static constexpr auto kDecRelTable = GenerateDecRelTable();
 // ADSR Envelope
 // ============================================================
 //
-// Juno-6 mode (mJ6Mode = true):
+// J6/J60 mode (mModel != kJ106):
 //   All stages are pure RC curves from the IR3R01 analog EG.
 //   Attack charges toward 1.2 (comparator overshoot), decay/release
 //   discharge toward undershoot targets to ensure finite completion.
-//   Slider→tau mapped by exponential formula from measured hardware.
+//   Slider->tau mapped by exponential formula from measured hardware.
 //
-// Juno-106 mode (mJ6Mode = false):
+// J106 mode (mModel == kJ106):
 //   ROM-accurate D7811G digital envelope generator, reverse-engineered
 //   from the IC29 (uPD7811G-152) disassembly of the Juno-106 voice CPU.
 //   ROM data sourced from: https://github.com/ErroneousBosh/j106roms
@@ -139,7 +141,7 @@ struct ADSR
   State mState = kFinished;
   float mEnv = 0.f;
   float mGateEnv = 0.f;
-  bool  mJ6Mode = false;       // true = Juno-6 RC curves, false = Juno-106 digital
+  Model mModel = kJ106;
 
   // --- Juno-106 integer state ---
   uint16_t mEnvInt = 0;        // current 14-bit envelope (0–kEnvMax)
@@ -207,9 +209,41 @@ struct ADSR
     mSusInt = static_cast<uint16_t>(s * kEnvMax);
   }
 
-  // --- Display helpers (slider 0–1 → ms, for tooltips and scope) ---
+  // --- Display helpers (slider 0-1 -> ms, for tooltips and scope) ---
 
-  // Attack: 1ms RC settling + (ticks - 1) × tick period
+  // J6 attack tau (seconds) from 11-point log-interpolated hardware measurement
+  static float AttackTauJ6(float slider)
+  {
+    static constexpr float kAttackTau[11] = {
+      0.000558f, 0.001674f, 0.008762f, 0.029468f, 0.064015f, 0.120998f,
+      0.238481f, 0.495993f, 0.607950f, 1.392486f, 1.674332f
+    };
+    float s = slider * 10.f;
+    int idx = std::min(static_cast<int>(s), 9);
+    float frac = s - idx;
+    return std::exp(std::log(kAttackTau[idx])
+          + frac * (std::log(kAttackTau[idx + 1]) - std::log(kAttackTau[idx])));
+  }
+
+  // J6 decay/release tau (seconds) from exponential fit of hardware measurements
+  static float DecRelTauJ6(float slider)
+  {
+    return 0.003577f * std::exp(12.9460f * slider - 5.0638f * slider * slider);
+  }
+
+  // J6 attack time in ms (tau * ln(6) * 1000, from IR3R01 comparator overshoot)
+  static float AttackMsJ6(float slider)
+  {
+    return AttackTauJ6(slider) * 1791.8f;
+  }
+
+  // J6 decay/release time in ms (tau * ln(11) * 1000)
+  static float DecRelMsJ6(float slider)
+  {
+    return DecRelTauJ6(slider) * 2397.9f;
+  }
+
+  // J106 attack: 1ms RC settling + (ticks - 1) x tick period
   static float AttackMs(float slider)
   {
     uint16_t inc = AttackIncFromSlider(slider);
@@ -238,7 +272,7 @@ struct ADSR
   void NoteOn()
   {
     mState = kAttack;
-    if (!mJ6Mode)
+    if (mModel == kJ106)
     {
       // Save current level as interpolation starting point (for smooth retrigger)
       mEnvPrev = static_cast<float>(mEnvInt) / kEnvMax;
@@ -258,7 +292,7 @@ struct ADSR
 
   float Process()
   {
-    if (mJ6Mode)
+    if (mModel != kJ106)
     {
       switch (mState)
       {

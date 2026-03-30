@@ -53,16 +53,78 @@ static void write32(std::vector<uint8_t>& buf, uint32_t val)
 static void addSysEx(std::vector<uint8_t>& track, uint32_t delta,
                      uint8_t ctrl, uint8_t val)
 {
-    // Roland Juno-106 SysEx: F0 41 32 00 ctrl val F7
+    // Roland Juno-106 IPR SysEx: F0 41 32 00 ctrl val F7
     writeVarLen(track, delta);
-    track.push_back(0xF0);           // SysEx start (in MIDI file format)
-    writeVarLen(track, 6);           // length of data after F0 (excluding F7... actually including F7)
-    track.push_back(0x41);           // Roland ID
-    track.push_back(0x32);           // Juno-106
-    track.push_back(0x00);           // channel
+    track.push_back(0xF0);
+    writeVarLen(track, 6);
+    track.push_back(0x41);
+    track.push_back(0x32);
+    track.push_back(0x00);
     track.push_back(ctrl);
     track.push_back(val);
-    track.push_back(0xF7);           // EOX
+    track.push_back(0xF7);
+}
+
+// SysEx CC 0x00-0x0F -> preset value array index
+static const int kSysExToPresetIdx[16] = {
+    3,   // 0x00 = kLfoRate
+    4,   // 0x01 = kLfoDelay
+    5,   // 0x02 = kDcoLfo
+    6,   // 0x03 = kDcoPwm
+    8,   // 0x04 = kDcoNoise
+    10,  // 0x05 = kVcfFreq
+    11,  // 0x06 = kVcfRes
+    12,  // 0x07 = kVcfEnv
+    13,  // 0x08 = kVcfLfo
+    14,  // 0x09 = kVcfKbd
+    15,  // 0x0A = kVcaLevel
+    16,  // 0x0B = kEnvA
+    17,  // 0x0C = kEnvD
+    18,  // 0x0D = kEnvS
+    19,  // 0x0E = kEnvR
+    7,   // 0x0F = kDcoSub
+};
+
+// APR (All Parameter Report): F0 41 30 00 pp [16 sliders] [sw1] [sw2] F7
+// Single 24-byte message instead of 18 individual IPR messages.
+static void addAPR(std::vector<uint8_t>& track, uint32_t delta,
+                   const int* presetValues, int patchNum)
+{
+    writeVarLen(track, delta);
+    track.push_back(0xF0);
+    writeVarLen(track, 23);  // 23 bytes after F0 including F7
+
+    track.push_back(0x41);                                       // Roland ID
+    track.push_back(0x30);                                       // APR command
+    track.push_back(0x00);                                       // channel
+    track.push_back(static_cast<uint8_t>(patchNum & 0x7F));      // patch number
+
+    // 16 slider bytes in SysEx control order (0x00-0x0F)
+    for (int cc = 0; cc < 16; cc++)
+        track.push_back(static_cast<uint8_t>(presetValues[kSysExToPresetIdx[cc]]));
+
+    // Switches 1
+    uint8_t sw1 = 0;
+    int oct = presetValues[29];
+    if (oct == 2) sw1 |= 0x04;
+    else if (oct == 1) sw1 |= 0x02;
+    else sw1 |= 0x01;
+    if (presetValues[23]) sw1 |= 0x08;  // pulse
+    if (presetValues[24]) sw1 |= 0x10;  // saw
+    bool chorusI = presetValues[27] != 0, chorusII = presetValues[28] != 0;
+    if (!chorusI && !chorusII) sw1 |= 0x20;
+    if (chorusI) sw1 |= 0x40;
+    track.push_back(sw1);
+
+    // Switches 2
+    uint8_t sw2 = 0;
+    if (presetValues[33] != 0) sw2 |= 0x01;  // PWM MAN/ENV (bit=1 is MAN)
+    if (presetValues[34]) sw2 |= 0x02;        // VCF env invert
+    if (presetValues[35] != 0) sw2 |= 0x04;   // VCA gate mode (bit=1 is GATE)
+    sw2 |= static_cast<uint8_t>((3 - presetValues[9]) << 3);  // HPF
+    track.push_back(sw2);
+
+    track.push_back(0xF7);
 }
 
 static void addNoteOn(std::vector<uint8_t>& track, uint32_t delta,
@@ -115,30 +177,7 @@ static void addTempo(std::vector<uint8_t>& track, uint32_t usPerBeat)
 //  9 kHpfFreq      20 kTranspose    31 kArpRange     42 kBenderLfo
 // 10 kVcfFreq      21 kHold         32 kLfoMode      43 kAdsrMode
 
-// SysEx CC mapping: CC 0x00-0x0F → slider params
-// CC 0x00 = kLfoRate(3),  0x01 = kLfoDelay(4),  0x02 = kDcoLfo(5),  0x03 = kDcoPwm(6)
-// CC 0x04 = kDcoNoise(8), 0x05 = kVcfFreq(10),  0x06 = kVcfRes(11), 0x07 = kVcfEnv(12)
-// CC 0x08 = kVcfLfo(13),  0x09 = kVcfKbd(14),   0x0A = kVcaLevel(15), 0x0B = kEnvA(16)
-// CC 0x0C = kEnvD(17),    0x0D = kEnvS(18),      0x0E = kEnvR(19),  0x0F = kDcoSub(7)
-
-static const int kSysExToPresetIdx[16] = {
-    3,   // 0x00 = kLfoRate
-    4,   // 0x01 = kLfoDelay
-    5,   // 0x02 = kDcoLfo
-    6,   // 0x03 = kDcoPwm
-    8,   // 0x04 = kDcoNoise
-    10,  // 0x05 = kVcfFreq
-    11,  // 0x06 = kVcfRes
-    12,  // 0x07 = kVcfEnv
-    13,  // 0x08 = kVcfLfo
-    14,  // 0x09 = kVcfKbd
-    15,  // 0x0A = kVcaLevel
-    16,  // 0x0B = kEnvA
-    17,  // 0x0C = kEnvD
-    18,  // 0x0D = kEnvS
-    19,  // 0x0E = kEnvR
-    7,   // 0x0F = kDcoSub
-};
+// SysEx CC mapping: see kSysExToPresetIdx defined above addAPR()
 
 static void writeMidiFile(const char* filename, const std::vector<uint8_t>& track);
 static void appendPresetToTrack(std::vector<uint8_t>& track, int presetIdx, bool firstPreset);
@@ -178,39 +217,8 @@ static void appendPresetToTrack(std::vector<uint8_t>& track, int presetIdx, bool
     if (firstPreset)
         addTempo(track, 500000); // 120 BPM
 
-    // --- SysEx ---
-    for (int cc = 0; cc < 16; cc++)
-    {
-        int pidx = kSysExToPresetIdx[cc];
-        uint8_t val = static_cast<uint8_t>(v[pidx]);
-        uint32_t delta = (cc == 0) ? presetGap : 10;
-        addSysEx(track, delta, static_cast<uint8_t>(cc), val);
-    }
-
-    // Switches 1
-    {
-        uint8_t sw1 = 0;
-        int oct = v[29];
-        if (oct == 2) sw1 |= 0x04;
-        else if (oct == 1) sw1 |= 0x02;
-        else sw1 |= 0x01;
-        if (v[23]) sw1 |= 0x08;
-        if (v[24]) sw1 |= 0x10;
-        bool chorusI = v[27] != 0, chorusII = v[28] != 0;
-        if (!chorusI && !chorusII) sw1 |= 0x20;
-        if (chorusI) sw1 |= 0x40;
-        addSysEx(track, 10, 0x10, sw1);
-    }
-
-    // Switches 2
-    {
-        uint8_t sw2 = 0;
-        if (v[33] == 0) sw2 |= 0x01;
-        if (v[34]) sw2 |= 0x02;
-        if (v[35] == 0) sw2 |= 0x04;
-        sw2 |= static_cast<uint8_t>((3 - v[9]) << 3);
-        addSysEx(track, 10, 0x11, sw2);
-    }
+    // --- APR SysEx (single message, all params at once) ---
+    addAPR(track, presetGap, v, presetIdx & 0x7F);
 
     // Compute timing from preset envelope values
     // Preset indices: 16=kEnvA, 17=kEnvD, 18=kEnvS, 19=kEnvR

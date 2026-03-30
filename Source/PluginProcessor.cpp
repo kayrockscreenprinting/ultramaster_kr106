@@ -2,6 +2,7 @@
 #include "PluginEditor.h"
 #include "KR106_Presets_JUCE.h"
 #include "DSP/KR106_HPF.h"
+#include "DSP/KR106ParamValue.h"
 
 // Debug logging to ~/Library/Application Support/KR106/debug.log
 // Automatically disabled in Release builds (NDEBUG is set by CMake).
@@ -27,7 +28,8 @@ static bool isLivePerformanceParam(int idx)
          idx == kPortaMode || idx == kPortaRate || idx == kTransposeOffset ||
          idx == kMasterVol || idx == kBender || idx == kBenderDco || idx == kBenderVcf ||
          idx == kBenderLfo || idx == kPower ||
-         idx == kAdsrMode;  // mode selects the bank, not a preset parameter
+         idx == kAdsrMode ||  // mode selects the bank, not a preset parameter
+         (idx >= kSettingVoices && idx <= kSettingMidiSysEx);
 }
 
 static bool sExcludeMask[kNumParams] = {};
@@ -179,53 +181,47 @@ KR106AudioProcessor::KR106AudioProcessor()
     return ms;
   };
 
-  auto vcfHzFromSlider = [this](float v) -> float {
-    if (mDSP.mAdsrMode == 0)
-      return kr106::j6_vcf_freq_from_slider(v);
-    return kr106::dacToHz(static_cast<uint16_t>(v * 0x3F80));
-  };
-  SFV fmtVcfHz = [this, vcfHzFromSlider](float v, int) {
-    float hz = vcfHzFromSlider(v);
+  using PV = kr106::ParamValue;
+
+  auto isJ6 = [this]() { return mDSP.mSynthModel == 0; };
+
+  SFV fmtVcfHz = [this, isJ6](float v, int) {
+    float hz = PV::vcfFreqHz(v, isJ6());
     if (hz >= 1000.f) return juce::String(hz / 1000.f, 1) + " kHz";
     return juce::String(hz, 1) + " Hz";
   };
-  VFS parseVcfHz = [this, bsearch, parseHz, vcfHzFromSlider](const juce::String& text) -> float {
+  VFS parseVcfHz = [this, bsearch, parseHz, isJ6](const juce::String& text) -> float {
     float hz = juce::jlimit(1.f, 20000.f, parseHz(text));
-    return bsearch([vcfHzFromSlider](float v) { return vcfHzFromSlider(v); }, hz);
+    return bsearch([isJ6](float v) { return PV::vcfFreqHz(v, isJ6()); }, hz);
   };
-  SFV fmtLfoRate = [this](float v, int) -> juce::String {
+  SFV fmtLfoRate = [this, isJ6](float v, int) -> juce::String {
     if (mLfoSyncHost)
     {
       int d = kr106::lfoDivisionFromSlider(v);
       return juce::String(kr106::kLfoDivNames[d]);
     }
-    float hz = (mDSP.mAdsrMode == 0) ? kr106::LFO::lfoFreqJ6(v)
-                                      : kr106::LFO::lfoFreqJ106(v);
-    return juce::String(hz, 1) + " Hz";
+    return juce::String(PV::lfoRateHz(v, isJ6()), 1) + " Hz";
   };
-  VFS parseLfoRate = [this, bsearch, parseHz](const juce::String& text) -> float {
+  VFS parseLfoRate = [this, bsearch, parseHz, isJ6](const juce::String& text) -> float {
     if (mLfoSyncHost)
     {
       for (int d = 0; d < kr106::kNumLfoDivisions; d++)
         if (text.trim().equalsIgnoreCase(kr106::kLfoDivNames[d]))
           return kr106::sliderFromLfoDivision(d);
     }
-    return bsearch([this](float v) {
-      return (mDSP.mAdsrMode == 0) ? kr106::LFO::lfoFreqJ6(v)
-                                    : kr106::LFO::lfoFreqJ106(v);
-    }, parseHz(text));
+    return bsearch([isJ6](float v) { return PV::lfoRateHz(v, isJ6()); }, parseHz(text));
   };
   SFV fmtLfoDelay = [](float v, int) {
-    if (v <= 0.f) return juce::String("Off");
-    return juce::String(juce::roundToInt(v * 1500.f)) + " ms";
+    float ms = PV::lfoDelayMs(v);
+    if (ms <= 0.f) return juce::String("Off");
+    return juce::String(juce::roundToInt(ms)) + " ms";
   };
   VFS parseLfoDelay = [](const juce::String& text) -> float {
     return juce::jlimit(0.f, 1.f, text.getFloatValue() / 1500.f);
   };
   SFV fmtVcaLevel = [](float v, int) {
-    // dB-linear: slider 0 = -10 dB, 0.5 = unity, 1 = +10 dB
-    double dB = -10.0 + 20.0 * (double)v;
-    if (dB >= 0.0) return "+" + juce::String(dB, 1) + " dB";
+    float dB = PV::vcaLevelDb(v);
+    if (dB >= 0.f) return "+" + juce::String(dB, 1) + " dB";
     return juce::String(dB, 1) + " dB";
   };
   VFS parseVcaLevel = [](const juce::String& text) -> float {
@@ -233,82 +229,49 @@ KR106AudioProcessor::KR106AudioProcessor()
     return juce::jlimit(0.f, 1.f, static_cast<float>((dB + 10.0) / 20.0));
   };
   SFV fmtTuning = [](float v, int) {
-    double cents = (double)v * 100.0;
-    if (cents >= 0.0) return "+" + juce::String(juce::roundToInt(cents)) + " cents";
+    float cents = PV::tuningCents(v);
+    if (cents >= 0.f) return "+" + juce::String(juce::roundToInt(cents)) + " cents";
     return juce::String(juce::roundToInt(cents)) + " cents";
   };
   VFS parseTuning = [](const juce::String& text) -> float {
     return juce::jlimit(-1.f, 1.f, text.getFloatValue() / 100.f);
   };
   SFV fmtPorta = [](float v, int) {
-    float semiPerSec = kr106::Voice<float>::portaRate(v);
-    if (semiPerSec <= 0.f) return juce::String("Off");
-    // Time for one octave (12 semitones)
-    double ms = 12000.0 / (double)semiPerSec;
-    if (ms >= 1000.0) return juce::String(ms / 1000.0, 2) + " s/oct";
+    float ms = PV::portaMsPerOct(v);
+    if (ms <= 0.f) return juce::String("Off");
+    if (ms >= 1000.f) return juce::String(ms / 1000.f, 2) + " s/oct";
     return juce::String(juce::roundToInt(ms)) + " ms/oct";
   };
   VFS parsePorta = [bsearch, parseMs](const juce::String& text) -> float {
     if (text.containsIgnoreCase("off")) return 0.f;
     float ms = parseMs(text);
-    // porta display is ms/oct = 12000/portaRate; portaRate is monotonically
-    // DECREASING (high slider = slow = large ms), so search in reverse
     float lo = 0.001f, hi = 1.f;
     for (int i = 0; i < 32; i++)
     {
       float mid = (lo + hi) * 0.5f;
-      float rate = kr106::Voice<float>::portaRate(mid);
-      float testMs = (rate > 0.f) ? 12000.f / rate : 1e6f;
+      float testMs = PV::portaMsPerOct(mid);
+      if (testMs <= 0.f) testMs = 1e6f;
       if (testMs < ms) lo = mid; else hi = mid;
     }
     return (lo + hi) * 0.5f;
   };
-  using ADSR = kr106::ADSR;
-
-  // J6 attack ms: same tau table as DSP, completion = tau * ln(6)
-  auto j6AtkMs = [](float v) -> float {
-    static constexpr float kAttackTau[11] = {
-      0.000558f, 0.001674f, 0.008762f, 0.029468f, 0.064015f, 0.120998f,
-      0.238481f, 0.495993f, 0.607950f, 1.392486f, 1.674332f
-    };
-    float s = v * 10.f;
-    int idx = std::min(static_cast<int>(s), 9);
-    float frac = s - idx;
-    float tau = std::exp(std::log(kAttackTau[idx]) + frac * (std::log(kAttackTau[idx + 1]) - std::log(kAttackTau[idx])));
-    return tau * 1.7918f * 1000.f;  // tau * ln(6) * 1000
-  };
-
-  // J6 decay/release ms: same tau formula as DSP, time to -20dB = tau * ln(11)
-  auto j6DRMs = [](float v) -> float {
-    float tau = 0.003577f * std::exp(12.9460f * v + -5.0638f * v * v);
-    return tau * 2.3979f * 1000.f;  // tau * ln(11) * 1000
-  };
-
-  auto fmtAtkMs = [this, j6AtkMs](float v, int) -> juce::String {
-    bool j6 = mParams[kAdsrMode] && mParams[kAdsrMode]->getValue() < 0.5f;
-    float ms = j6 ? j6AtkMs(v) : ADSR::AttackMs(v);
+  SFV fmtAtkMs = [this, isJ6](float v, int) -> juce::String {
+    float ms = PV::attackMs(v, isJ6());
     if (ms >= 1000.f) return juce::String(ms / 1000.f, 2) + " s";
     return juce::String(juce::roundToInt(ms)) + " ms";
   };
-  VFS parseAtkMs = [this, bsearch, parseMs, j6AtkMs](const juce::String& text) -> float {
+  VFS parseAtkMs = [this, bsearch, parseMs, isJ6](const juce::String& text) -> float {
     float ms = parseMs(text);
-    return bsearch([this, j6AtkMs](float v) {
-      bool j6 = mParams[kAdsrMode] && mParams[kAdsrMode]->getValue() < 0.5f;
-      return j6 ? j6AtkMs(v) : ADSR::AttackMs(v);
-    }, ms);
+    return bsearch([isJ6](float v) { return PV::attackMs(v, isJ6()); }, ms);
   };
-  auto fmtDRMs = [this, j6DRMs](float v, int) -> juce::String {
-    bool j6 = mParams[kAdsrMode] && mParams[kAdsrMode]->getValue() < 0.5f;
-    float ms = j6 ? j6DRMs(v) : ADSR::DecRelMs(v);
+  SFV fmtDRMs = [this, isJ6](float v, int) -> juce::String {
+    float ms = PV::decRelMs(v, isJ6());
     if (ms >= 1000.f) return juce::String(ms / 1000.f, 2) + " s";
     return juce::String(juce::roundToInt(ms)) + " ms";
   };
-  VFS parseDRMs = [this, bsearch, parseMs, j6DRMs](const juce::String& text) -> float {
+  VFS parseDRMs = [this, bsearch, parseMs, isJ6](const juce::String& text) -> float {
     float ms = parseMs(text);
-    return bsearch([this, j6DRMs](float v) {
-      bool j6 = mParams[kAdsrMode] && mParams[kAdsrMode]->getValue() < 0.5f;
-      return j6 ? j6DRMs(v) : ADSR::DecRelMs(v);
-    }, ms);
+    return bsearch([isJ6](float v) { return PV::decRelMs(v, isJ6()); }, ms);
   };
 
   // Bender sensitivity sliders
@@ -323,7 +286,7 @@ KR106AudioProcessor::KR106AudioProcessor()
         int d = kr106::divisionFromSlider(v);
         return juce::String(kr106::kDivNames[d]);
       }
-      return juce::String(juce::roundToInt(kr106::Arpeggiator::arpRate(v))) + " bpm";
+      return juce::String(juce::roundToInt(PV::arpRateBpm(v))) + " bpm";
     },
     [this, bsearch](const juce::String& text) -> float {
       // When synced, try to match division name
@@ -342,18 +305,15 @@ KR106AudioProcessor::KR106AudioProcessor()
   addSlider(kLfoDelay,   "LFO Delay",   0.f,   0.f, 1.f, fmtLfoDelay, parseLfoDelay);
 
   // DCO
-  SFV fmtDcoLfo = [this](float v, int) -> juce::String {
-    float st = (mDSP.mAdsrMode == 0) ? kr106::Voice<float>::dcoLfoDepth6(v)
-                                      : kr106::Voice<float>::dcoLfoDepth106(v);
+  SFV fmtDcoLfo = [this, isJ6](float v, int) -> juce::String {
+    float st = PV::dcoLfoSemitones(v, isJ6());
     if (st < 0.05f) return juce::String("Off");
     return juce::String(st, 1) + " st";
   };
-  VFS parseDcoLfo = [this, bsearch](const juce::String& text) -> float {
+  VFS parseDcoLfo = [this, bsearch, isJ6](const juce::String& text) -> float {
     if (text.containsIgnoreCase("off")) return 0.f;
-    return bsearch([this](float v) {
-      return (mDSP.mAdsrMode == 0) ? kr106::Voice<float>::dcoLfoDepth6(v)
-                                    : kr106::Voice<float>::dcoLfoDepth106(v);
-    }, text.getFloatValue());
+    return bsearch([isJ6](float v) { return PV::dcoLfoSemitones(v, isJ6()); },
+                   text.getFloatValue());
   };
   addSlider(kDcoLfo,     "DCO LFO",     0.f, 0.f, 1.f, fmtDcoLfo, parseDcoLfo);
   addSlider(kDcoPwm,     "DCO PWM",     0.5f, 0.f, 1.f, fmtPct, parsePct);
@@ -371,18 +331,15 @@ KR106AudioProcessor::KR106AudioProcessor()
   addSlider(kVcfFreq,    "VCF Freq",    1.f,  0.f, 1.f, fmtVcfHz, parseVcfHz);
   addSlider(kVcfRes,     "VCF Res",     0.f,  0.f, 1.f, fmtPct, parsePct);
   addSlider(kVcfEnv,     "VCF Env",     0.f,  0.f, 1.f, fmtPct, parsePct);
-  SFV fmtVcfLfo = [this](float v, int) -> juce::String {
-    float st = (mDSP.mAdsrMode == 0) ? kr106::Voice<float>::vcfLfoDepth6(v)
-                                      : kr106::Voice<float>::vcfLfoDepth106(v);
+  SFV fmtVcfLfo = [this, isJ6](float v, int) -> juce::String {
+    float st = PV::vcfLfoSemitones(v, isJ6());
     if (st < 0.5f) return juce::String("Off");
     return juce::String(st, 1) + " st";
   };
-  VFS parseVcfLfo = [this, bsearch](const juce::String& text) -> float {
+  VFS parseVcfLfo = [this, bsearch, isJ6](const juce::String& text) -> float {
     if (text.containsIgnoreCase("off")) return 0.f;
-    return bsearch([this](float v) {
-      return (mDSP.mAdsrMode == 0) ? kr106::Voice<float>::vcfLfoDepth6(v)
-                                    : kr106::Voice<float>::vcfLfoDepth106(v);
-    }, text.getFloatValue());
+    return bsearch([isJ6](float v) { return PV::vcfLfoSemitones(v, isJ6()); },
+                   text.getFloatValue());
   };
   addSlider(kVcfLfo,     "VCF LFO",     0.f,  0.f, 1.f, fmtVcfLfo, parseVcfLfo);
   addSlider(kVcfKbd,     "VCF Kbd",     0.f,  0.f, 1.f, fmtPct, parsePct);
@@ -427,9 +384,9 @@ KR106AudioProcessor::KR106AudioProcessor()
 
   // Master volume knob (applied after scope, before output)
   SFV fmtMasterVol = [](float v, int) {
-    if (v <= 0.f) return juce::String("-inf dB");
-    double dB = 20.0 * std::log10((double)(v * v)); // squared taper
-    if (dB >= 0.0) return "+" + juce::String(dB, 1) + " dB";
+    float dB = PV::masterVolDb(v);
+    if (dB <= -200.f) return juce::String("-inf dB");
+    if (dB >= 0.f) return "+" + juce::String(dB, 1) + " dB";
     return juce::String(dB, 1) + " dB";
   };
   VFS parseMasterVol = [](const juce::String& text) -> float {
@@ -438,6 +395,21 @@ KR106AudioProcessor::KR106AudioProcessor()
     return juce::jlimit(0.f, 1.f, static_cast<float>(std::sqrt(std::pow(10.0, dB / 20.0))));
   };
   addSlider(kMasterVol, "Master Volume", 0.5f, 0.f, 1.f, fmtMasterVol, parseMasterVol);
+
+  // Settings (exposed as params for headless LV2 hosts)
+  addSwitch(kSettingVoices,      "Voices",             6, 6, 10,
+    [](int v, int) {
+      if (v == 6 || v == 8 || v == 10) return juce::String(v);
+      return juce::String(6); // snap to nearest valid
+    });
+  addSwitch(kSettingOversample,  "VCF Oversample",     4, 2, 4,
+    [](int v, int) { return juce::String(v) + "x"; });
+  addBool(kSettingIgnoreVel,     "Ignore Velocity",    true);
+  addBool(kSettingArpLimitKbd,   "Arp Limit Kbd",      true);
+  addBool(kSettingArpSync,       "Arp Sync Host",      false);
+  addBool(kSettingLfoSync,       "LFO Sync Host",      false);
+  addBool(kSettingMonoRetrig,    "Mono Retrigger",     true);
+  addBool(kSettingMidiSysEx,     "MIDI SysEx",         false);
 
   // Build factory presets from compiled-in data (raw 7-bit integer values)
   constexpr int kFactoryValues = sizeof(KR106FactoryPreset::values) / sizeof(int);
@@ -615,9 +587,9 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             if (i == s)
             {
               uint8_t sw2 = 0;
-              if (juce::roundToInt(getParamValue(kPwmMode)) == 0) sw2 |= 0x01;
+              if (juce::roundToInt(getParamValue(kPwmMode)) != 0) sw2 |= 0x01; // bit=1 is MAN/ENV
               if (getParamValue(kVcfEnvInv) > 0.5f) sw2 |= 0x02;
-              if (juce::roundToInt(getParamValue(kVcaMode)) == 0) sw2 |= 0x04;
+              if (juce::roundToInt(getParamValue(kVcaMode)) != 0) sw2 |= 0x04; // bit=1 is GATE
               int hpf = juce::roundToInt(getParamValue(kHpfFreq));
               sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
               uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00, 0x11, sw2, 0xF7 };
@@ -977,9 +949,9 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       {
         uint8_t sw2 = 0;
         int pwm = juce::roundToInt(getParamValue(kPwmMode));
-        if (pwm == 0) sw2 |= 0x01;
+        if (pwm != 0) sw2 |= 0x01; // bit=1 is MAN/ENV
         if (getParamValue(kVcfEnvInv) > 0.5f) sw2 |= 0x02;
-        if (juce::roundToInt(getParamValue(kVcaMode)) == 0) sw2 |= 0x04;
+        if (juce::roundToInt(getParamValue(kVcaMode)) != 0) sw2 |= 0x04; // bit=1 is GATE
         int hpf = juce::roundToInt(getParamValue(kHpfFreq));
         sw2 |= static_cast<uint8_t>((3 - hpf) << 3);
         apr[22] = sw2;
@@ -1014,9 +986,9 @@ void KR106AudioProcessor::decodeSwitches1(uint8_t val)
 
 void KR106AudioProcessor::decodeSwitches2(uint8_t val)
 {
-    mParams[kPwmMode]->setValueNotifyingHost(mParams[kPwmMode]->convertTo0to1(static_cast<float>((val & 0x01) ? 0 : 1)));
+    mParams[kPwmMode]->setValueNotifyingHost(mParams[kPwmMode]->convertTo0to1(static_cast<float>((val & 0x01) ? 1 : 0))); // bit=1 is MAN/ENV
     mParams[kVcfEnvInv]->setValueNotifyingHost((val & 0x02) ? 1.f : 0.f);
-    mParams[kVcaMode]->setValueNotifyingHost((val & 0x04) ? 0.f : 1.f);
+    mParams[kVcaMode]->setValueNotifyingHost((val & 0x04) ? 1.f : 0.f); // bit=1 is GATE
     int hpf = 3 - ((val >> 3) & 0x03);
     mParams[kHpfFreq]->setValueNotifyingHost(mParams[kHpfFreq]->convertTo0to1(static_cast<float>(hpf)));
 }
@@ -1039,6 +1011,51 @@ void KR106AudioProcessor::parameterChanged(int paramIdx, float newValue)
   else if (paramIdx == kMasterVol)
   {
     // handled in processBlock, not dispatched to DSP
+  }
+  else if (paramIdx == kSettingVoices)
+  {
+    // Snap to valid values: 6, 8, or 10
+    int v = juce::roundToInt(newValue);
+    if (v <= 7) v = 6;
+    else if (v <= 9) v = 8;
+    else v = 10;
+    mVoiceCount = v;
+    mDSP.SetActiveVoices(v);
+  }
+  else if (paramIdx == kSettingOversample)
+  {
+    int os = juce::roundToInt(newValue) <= 3 ? 2 : 4;
+    mVcfOversample = os;
+    mDSP.ForEachVoice([os](kr106::Voice<float>& voice) {
+      voice.mVCF.SetOversample(os);
+    });
+  }
+  else if (paramIdx == kSettingIgnoreVel)
+  {
+    mIgnoreVelocity = newValue > 0.5f;
+    mDSP.mIgnoreVelocity = mIgnoreVelocity;
+  }
+  else if (paramIdx == kSettingArpLimitKbd)
+  {
+    mArpLimitKbd = newValue > 0.5f;
+    mDSP.mArp.mLimitToKeyboard = mArpLimitKbd;
+  }
+  else if (paramIdx == kSettingArpSync)
+  {
+    mArpSyncHost = newValue > 0.5f;
+  }
+  else if (paramIdx == kSettingLfoSync)
+  {
+    mLfoSyncHost = newValue > 0.5f;
+  }
+  else if (paramIdx == kSettingMonoRetrig)
+  {
+    mMonoRetrigger = newValue > 0.5f;
+    mDSP.mMonoRetrigger = mMonoRetrigger;
+  }
+  else if (paramIdx == kSettingMidiSysEx)
+  {
+    mMidiOutSysEx = newValue > 0.5f;
   }
   else
   {
@@ -1080,15 +1097,15 @@ void KR106AudioProcessor::parameterChanged(int paramIdx, float newValue)
         return (lo + hi) * 0.5f;
       };
 
-      auto j6Hz   = [](float v) { return kr106::j6_vcf_freq_from_slider(v); };
+      auto j60Hz  = [](float v) { return kr106::j60_vcf_freq_from_slider(v); };
       auto j106Hz = [](float v) { return kr106::dacToHz(static_cast<uint16_t>(v * 0x3F80)); };
 
       // VCF Freq: preserve frequency in Hz
       {
         float vcfSlider = mParams[kVcfFreq]->getValue();
-        float srcHz = toJ106 ? j6Hz(vcfSlider) : j106Hz(vcfSlider);
+        float srcHz = toJ106 ? j60Hz(vcfSlider) : j106Hz(vcfSlider);
         auto targetFn = toJ106 ? std::function<float(float)>(j106Hz)
-                                : std::function<float(float)>(j6Hz);
+                                : std::function<float(float)>(j60Hz);
         mParams[kVcfFreq]->setValueNotifyingHost(remap(srcHz, targetFn));
       }
     }
@@ -1149,9 +1166,7 @@ void KR106AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
   // UI state (backwards-compatible: old hosts just ignore extra bytes)
   stream.writeInt(0x4B523130); // 'KR10' magic
   stream.writeFloat(mUIScale);
-  stream.writeInt(mVoiceCount);
-  stream.writeBool(mIgnoreVelocity);
-  stream.writeBool(mArpLimitKbd);
+  // Voice count, velocity, arp limit etc. are now params (kSetting*) — saved above
 }
 
 void KR106AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -1172,20 +1187,37 @@ void KR106AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
   if (!stream.isExhausted() && stream.readInt() == 0x4B523130)
   {
     mUIScale = stream.readFloat();
+    // Old state format stored voice count, velocity, arp limit here.
+    // New format stores them as params (kSetting*), already restored above.
+    // Consume leftover bytes from old format so we don't misparse.
     if (!stream.isExhausted())
     {
-      mVoiceCount = stream.readInt();
-      mDSP.SetActiveVoices(mVoiceCount);
+      int oldVoices = stream.readInt();
+      // If settings params were at default (old state predates kSetting*),
+      // apply the legacy values
+      if (numParams < kSettingVoices + 1)
+      {
+        mVoiceCount = oldVoices;
+        mDSP.SetActiveVoices(mVoiceCount);
+      }
     }
     if (!stream.isExhausted())
     {
-      mIgnoreVelocity = stream.readBool();
-      mDSP.mIgnoreVelocity = mIgnoreVelocity;
+      bool oldIgnVel = stream.readBool();
+      if (numParams < kSettingIgnoreVel + 1)
+      {
+        mIgnoreVelocity = oldIgnVel;
+        mDSP.mIgnoreVelocity = mIgnoreVelocity;
+      }
     }
     if (!stream.isExhausted())
     {
-      mArpLimitKbd = stream.readBool();
-      mDSP.mArp.mLimitToKeyboard = mArpLimitKbd;
+      bool oldArpLimit = stream.readBool();
+      if (numParams < kSettingArpLimitKbd + 1)
+      {
+        mArpLimitKbd = oldArpLimit;
+        mDSP.mArp.mLimitToKeyboard = mArpLimitKbd;
+      }
     }
   }
 }
@@ -1295,36 +1327,19 @@ void KR106AudioProcessor::loadGlobalSettings()
   auto scale = KR106PresetManager::getSetting("uiScale", 0.f);
   if ((float)scale > 0.f) mUIScale = (float)scale;
 
-  auto voices = KR106PresetManager::getSetting("voiceCount", 6);
-  mVoiceCount = (int)voices;
-  mDSP.SetActiveVoices(mVoiceCount);
-
-  auto ignVel = KR106PresetManager::getSetting("ignoreVelocity", true);
-  mIgnoreVelocity = (bool)ignVel;
-  mDSP.mIgnoreVelocity = mIgnoreVelocity;
-
-  auto arpLimit = KR106PresetManager::getSetting("arpLimitKbd", true);
-  mArpLimitKbd = (bool)arpLimit;
-  mDSP.mArp.mLimitToKeyboard = mArpLimitKbd;
-
-  auto arpSync = KR106PresetManager::getSetting("arpSyncHost", false);
-  mArpSyncHost = (bool)arpSync;
-
-  auto lfoSync = KR106PresetManager::getSetting("lfoSyncHost", false);
-  mLfoSyncHost = (bool)lfoSync;
-
-  auto monoRetrig = KR106PresetManager::getSetting("monoRetrigger", true);
-  mMonoRetrigger = (bool)monoRetrig;
-  mDSP.mMonoRetrigger = mMonoRetrigger;
-
-  auto midiSysEx = KR106PresetManager::getSetting("midiOutSysEx", false);
-  mMidiOutSysEx = (bool)midiSysEx;
-
-  auto vcfOS = KR106PresetManager::getSetting("vcfOversample", 4);
-  mVcfOversample = ((int)vcfOS == 2) ? 2 : 4;
-  mDSP.ForEachVoice([this](kr106::Voice<float>& v) {
-    v.mVCF.SetOversample(mVcfOversample);
-  });
+  // Load settings into params (parameterChanged will sync to DSP)
+  auto setParamFromSetting = [this](int idx, float val) {
+    auto* p = mParams[idx];
+    if (p) p->setValueNotifyingHost(p->convertTo0to1(val));
+  };
+  setParamFromSetting(kSettingVoices,      static_cast<float>((int)KR106PresetManager::getSetting("voiceCount", 6)));
+  setParamFromSetting(kSettingOversample,  static_cast<float>(((int)KR106PresetManager::getSetting("vcfOversample", 4) == 2) ? 2 : 4));
+  setParamFromSetting(kSettingIgnoreVel,   (bool)KR106PresetManager::getSetting("ignoreVelocity", true)  ? 1.f : 0.f);
+  setParamFromSetting(kSettingArpLimitKbd, (bool)KR106PresetManager::getSetting("arpLimitKbd", true)     ? 1.f : 0.f);
+  setParamFromSetting(kSettingArpSync,     (bool)KR106PresetManager::getSetting("arpSyncHost", false)    ? 1.f : 0.f);
+  setParamFromSetting(kSettingLfoSync,     (bool)KR106PresetManager::getSetting("lfoSyncHost", false)    ? 1.f : 0.f);
+  setParamFromSetting(kSettingMonoRetrig,  (bool)KR106PresetManager::getSetting("monoRetrigger", true)   ? 1.f : 0.f);
+  setParamFromSetting(kSettingMidiSysEx,   (bool)KR106PresetManager::getSetting("midiOutSysEx", false)   ? 1.f : 0.f);
 
   // Load MIDI learn CC map (param→CC, multiple params can share a CC)
   auto ccMap = KR106PresetManager::getSetting("midiLearnMap");

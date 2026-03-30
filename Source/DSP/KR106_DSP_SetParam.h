@@ -26,7 +26,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
   {
     case kDcoLfo: {
       mSliderDcoLfo = static_cast<float>(value);
-      float depth = (mAdsrMode == 0)
+      float depth = (mSynthModel == 0)
         ? kr106::Voice<T>::dcoLfoDepth6(mSliderDcoLfo)
         : kr106::Voice<T>::dcoLfoDepth106(mSliderDcoLfo);
       ForEachVoice([depth](kr106::Voice<T>& v) { v.mDcoLfo = depth; });
@@ -35,20 +35,32 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     case kDcoPwm:
       ForEachVoice([value](kr106::Voice<T>& v) { v.mDcoPwm = static_cast<float>(value); });
       break;
-    case kDcoSub:
-      ForEachVoice([value](kr106::Voice<T>& v) { v.mDcoSub = static_cast<float>(value); });
+    case kDcoSub: {
+      mSliderDcoSub = static_cast<float>(value);
+      float level = (mSynthModel == 0)
+        ? kr106::Voice<T>::dcoSubLevel_j6(mSliderDcoSub)
+        : kr106::Voice<T>::dcoSubLevel_j106(mSliderDcoSub);
+      ForEachVoice([level](kr106::Voice<T>& v) { v.mDcoSub = level; });
       break;
-    case kDcoNoise:
-      ForEachVoice([value](kr106::Voice<T>& v) { v.mDcoNoise = static_cast<float>(value); });
+    }
+    case kDcoNoise: {
+      mSliderDcoNoise = static_cast<float>(value);
+      float level = (mSynthModel == 0)
+        ? kr106::Voice<T>::dcoNoiseLevel_j6(mSliderDcoNoise)
+        : kr106::Voice<T>::dcoNoiseLevel_j106(mSliderDcoNoise);
+      ForEachVoice([level](kr106::Voice<T>& v) { v.mDcoNoise = level; });
       break;
+    }
     case kVcfFreq: {
       mSliderVcfFreq = static_cast<float>(value);
       float s = mSliderVcfFreq;
       float hzJ6 = kr106::j6_vcf_freq_from_slider(s);
+      float hzJ60 = kr106::j60_vcf_freq_from_slider(s);
       uint16_t cutoffInt = static_cast<uint16_t>(s * 0x3F80);
       float hzJ106 = kr106::dacToHz(cutoffInt);
-      ForEachVoice([hzJ6, hzJ106, cutoffInt](kr106::Voice<T>& v) {
+      ForEachVoice([hzJ6, hzJ60, hzJ106, cutoffInt](kr106::Voice<T>& v) {
         v.mVcfFreq = hzJ6;
+        v.mVcfFreqJ60 = hzJ60;
         v.mVcfFreqJ106 = hzJ106;
         v.mVcfCutoffInt = cutoffInt;
       });
@@ -69,7 +81,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     }
     case kVcfLfo: {
       mSliderVcfLfo = static_cast<float>(value);
-      float depth = (mAdsrMode == 0)
+      float depth = (mSynthModel == 0)
         ? kr106::Voice<T>::vcfLfoDepth6(mSliderVcfLfo)
         : kr106::Voice<T>::vcfLfoDepth106(mSliderVcfLfo);
       uint8_t lfoDepthInt = static_cast<uint8_t>(mSliderVcfLfo * 254.f);
@@ -106,7 +118,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
 
     case kEnvA: {
       mSliderA = static_cast<float>(value);
-      if (mAdsrMode == 0) {
+      if (mSynthModel == 0) {
         // Measured from 1982 Juno-6: 6 voices at slider positions 1–9,
         // averaged completion times (seconds):
         //   A=1: .003  A=2: .016  A=3: .053  A=4: .115  A=5: .217
@@ -116,15 +128,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
         // nonlinearly to resistance — the dead spot at A=7-8 is a pot characteristic.
         // Log-linear interpolation between tau values (tau = completion / ln(6),
         // since kAttackTarget=1.2 and the RC reaches 1.0 at ln(6) time constants).
-        static constexpr float kAttackTau[11] = {
-          0.000558f, 0.001674f, 0.008762f, 0.029468f, 0.064015f, 0.120998f,
-          0.238481f, 0.495993f, 0.607950f, 1.392486f, 1.674332f
-        };
-        float s = mSliderA * 10.f;
-        int idx = static_cast<int>(s);
-        if (idx >= 10) idx = 9;
-        float frac = s - idx;
-        float tau = std::exp(std::log(kAttackTau[idx]) + frac * (std::log(kAttackTau[idx + 1]) - std::log(kAttackTau[idx])));
+        float tau = kr106::ADSR::AttackTauJ6(mSliderA);
         ForEachVoice([tau](kr106::Voice<T>& v) { v.mADSR.SetAttackTau(tau); });
       } else {
         float s = mSliderA;
@@ -134,15 +138,14 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     }
     case kEnvD: {
       mSliderD = static_cast<float>(value);
-      if (mAdsrMode == 0) {
+      if (mSynthModel == 0) {
         // Measured from 1982 Juno-6, VCF sweep durations (seconds):
         //   D=2: .086  D=3: .262  D=4: .821  D=5: 2.610  D=6: 2.325
         //   D=7: 5.609  D=8: 8.774  D=9: 20.051  D=10: 22.093
         // Re-measured D=4b: .876  D=5b: 1.587  D=6b: 2.564
         // Quadratic-exponential fit excluding dead spots at D=4, D=8.
         // FIXME(kr106): re-measure with pot voltage readings for better accuracy.
-        float s = mSliderD;
-        float tau = 0.003577f * std::exp(12.9460f * s + -5.0638f * s * s);
+        float tau = kr106::ADSR::DecRelTauJ6(mSliderD);
         ForEachVoice([tau](kr106::Voice<T>& v) { v.mADSR.SetDecayTau(tau); });
       } else {
         int idx = static_cast<int>(mSliderD * 127.f + 0.5f);
@@ -157,11 +160,10 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     }
     case kEnvR: {
       mSliderR = static_cast<float>(value);
-      if (mAdsrMode == 0) {
+      if (mSynthModel == 0) {
         // Same circuit as decay (shared R/C network on IR3R01).
         // FIXME(kr106): re-measure with pot voltage readings for better accuracy.
-        float s = mSliderR;
-        float tau = 0.003577f * std::exp(12.9460f * s + -5.0638f * s * s);
+        float tau = kr106::ADSR::DecRelTauJ6(mSliderR);
         ForEachVoice([tau](kr106::Voice<T>& v) { v.mADSR.SetReleaseTau(tau); });
       } else {
         int idx = static_cast<int>(mSliderR * 127.f + 0.5f);
@@ -206,15 +208,16 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       });
       break;
     case kAdsrMode: {
-      mAdsrMode = static_cast<int>(value);
-      bool j6 = (mAdsrMode == 0);
-      ForEachVoice([j6](kr106::Voice<T>& v) {
-        v.mJ6Mode = j6;
-        v.mADSR.mJ6Mode = j6;
-        v.mVCF.mJ106Res = !j6;
-        v.mOsc.mPulseInvert = !j6;
+      mSynthModel = static_cast<int>(value);
+      // UI: 0 = J60 (60 mode), 1 = J106 (106 mode)
+      kr106::Model model = (mSynthModel == 0) ? kr106::kJ60 : kr106::kJ106;
+      ForEachVoice([model](kr106::Voice<T>& v) {
+        v.mModel = model;
+        v.mADSR.mModel = model;
+        v.mVCF.mJ106Res = (model == kr106::kJ106);
+        v.mOsc.mPulseInvert = (model == kr106::kJ106);
       });
-      mLFO.mJ6Mode = j6;
+      mLFO.mModel = model;
       SetParam(kEnvA, mSliderA);
       SetParam(kEnvD, mSliderD);
       SetParam(kEnvR, mSliderR);
@@ -226,6 +229,9 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       SetParam(kVcfEnv, mSliderVcfEnv);
       SetParam(kVcfKbd, mSliderVcfKbd);
       SetParam(kBenderVcf, mSliderBenderVcf);
+      SetParam(kDcoSub, mSliderDcoSub);
+      SetParam(kDcoNoise, mSliderDcoNoise);
+      SetParam(kVcaLevel, mSliderVcaLevel);
       break;
     }
     case kBender:
@@ -252,7 +258,9 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     }
 
     case kVcaLevel: {
-      // Patch Level VCA (PC1252H2 compander IC used as VCA)
+      mSliderVcaLevel = static_cast<float>(value);
+      // J6: no patch-level VCA -- signal goes HPF -> chorus at unity.
+      // J60/J106: PC1252H2 compander IC used as VCA.
       //
       // A user-adjustable level slider stored with each patch normalizes
       // signal amplitude for consistent volume when switching patches
@@ -265,10 +273,14 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       // is -5.9 mV/dB, yielding approximately +/-10 dB of gain range.
       // Confirmed by hardware recording (Lewis Francis): -9.8 dB / +9.9 dB.
       // dB-linear law: slider 0 = -10 dB, slider 0.5 = unity, slider 1 = +10 dB
-      static constexpr float kMinDB = -10.f;
-      static constexpr float kMaxDB = +10.f;
-      float dB = kMinDB + (kMaxDB - kMinDB) * static_cast<float>(value);
-      mVcaLevel = powf(10.f, dB / 20.f);
+      if (mSynthModel == 0) {
+        mVcaLevel = 1.f; // J6: no patch-level VCA
+      } else {
+        static constexpr float kMinDB = -10.f;
+        static constexpr float kMaxDB = +10.f;
+        float dB = kMinDB + (kMaxDB - kMinDB) * static_cast<float>(value);
+        mVcaLevel = powf(10.f, dB / 20.f);
+      }
       break;
     }
 
