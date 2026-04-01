@@ -55,6 +55,8 @@ public:
   int getNumPrograms() override;
   int getCurrentProgram() override;
   void setCurrentProgram(int index) override;
+  // Set active patch slot without loading patch
+  void setCurrentProgramIndex(int index);
   const juce::String getProgramName(int index) override;
   void changeProgramName(int, const juce::String&) override {}
 

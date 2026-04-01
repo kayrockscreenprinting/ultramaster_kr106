@@ -1329,6 +1329,12 @@ void KR106AudioProcessor::setCurrentProgram(int index)
   mSendPresetSysEx.store(true, std::memory_order_release);
 }
 
+void KR106AudioProcessor::setCurrentProgramIndex(int index)
+{
+  mCurrentPreset = index;
+  mInitialDefault = false;
+}
+
 void KR106AudioProcessor::reloadPresetsFromFile(const juce::File& file)
 {
   mPresetMgr.loadFromFile(file, mParams, kNumParams);

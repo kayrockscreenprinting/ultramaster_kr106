@@ -410,7 +410,7 @@ private:
                     if (name.isNotEmpty())
                     {
                         // Switch to target slot, then save
-                        safeThis->mProcessor->setCurrentProgram(targetIdx);
+                        safeThis->mProcessor->setCurrentProgramIndex(targetIdx);
                         safeThis->mProcessor->saveCurrentPresetToCSV(name);
                         safeThis->repaint();
                     }
