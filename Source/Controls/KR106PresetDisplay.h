@@ -62,7 +62,7 @@ public:
             int cellH = juce::roundToInt((row + 1) * rh) - y;
 
             juce::String name = mProcessor->getProgramName(i);
-            KR106Theme::drawCell(g, name.substring(0, 14), x, y, colW, cellH,
+            KR106Theme::drawCell(g, name.substring(0, 16), x, y, colW, cellH,
                                  i == mHoverIndex, i == current);
         }
 
