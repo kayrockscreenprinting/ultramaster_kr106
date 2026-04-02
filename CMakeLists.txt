@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(KR106 VERSION 2.4.6.2)
+project(KR106 VERSION 2.4.6.3)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
 
@@ -11,11 +11,13 @@ option(KR106_COPY_AFTER_BUILD "Copy plugins to system directories after build" O
 
 juce_add_plugin(KR106
     COMPANY_NAME "Kayrock"
+    COMPANY_WEBSITE "https://kayrock.org/kr106"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
     PLUGIN_MANUFACTURER_CODE Krok
     PLUGIN_CODE Kr16
+    PLUGIN_DESCRIPTION "Juno-6/60/106 emulation v${CMAKE_PROJECT_VERSION}"
     FORMATS ${KR106_FORMATS}
     PRODUCT_NAME "Ultramaster KR-106"
     PLUGIN_NAME "Ultramaster KR-106"
@@ -64,7 +66,7 @@ target_sources(KR106 PRIVATE
     Source/DSP/KR106Chorus.h
     Source/DSP/KR106LFO.h
     Source/DSP/KR106Noise.h
-    Source/DSP/KR106Oscillators.h
+
     Source/DSP/KR106VCF.h
     Source/DSP/KR106VcfFreqJ106.h
     Source/DSP/KR106VcfFreqJ6.h
@@ -144,7 +146,7 @@ if(APPLE)
         Source/DSP/KR106Chorus.h
         Source/DSP/KR106LFO.h
         Source/DSP/KR106Noise.h
-        Source/DSP/KR106Oscillators.h
+    
         Source/DSP/KR106VCF.h
         Source/DSP/KR106VcfFreqJ106.h
         Source/DSP/KR106VcfFreqJ6.h
