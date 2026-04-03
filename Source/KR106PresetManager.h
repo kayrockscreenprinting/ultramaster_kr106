@@ -224,7 +224,7 @@ public:
         {
             KR106Preset init;
             init.name = "Init";
-            init.values.assign(numParams, 0.f);
+            setInitValues(init.values, numParams);
             loaded.push_back(std::move(init));
         }
 
@@ -269,12 +269,28 @@ public:
         mPresets[index].name = name.removeCharacters(",");
     }
 
+    // Init preset: saw on, VCF wide open, VCA gate, HPF flat
+    static void setInitValues(std::vector<float>& v, int numParams)
+    {
+        v.assign(numParams, 0.f);
+        // Indices from EParams enum:
+        //  9 kHpfFreq, 10 kVcfFreq, 15 kVcaLevel, 18 kEnvS
+        // 24 kDcoSaw, 29 kOctTranspose, 35 kVcaMode
+        if (numParams > 10)  v[10] = 1.f;   // kVcfFreq = wide open
+        if (numParams > 9)   v[9]  = 1.f;   // kHpfFreq = flat (position 1)
+        if (numParams > 15)  v[15] = 0.5f;  // kVcaLevel = unity
+        if (numParams > 18)  v[18] = 1.f;   // kEnvS = max sustain
+        if (numParams > 24)  v[24] = 1.f;   // kDcoSaw = on
+        if (numParams > 29)  v[29] = 1.f;   // kOctTranspose = middle (4')
+        if (numParams > 35)  v[35] = 1.f;   // kVcaMode = gate
+    }
+
     void clearPreset(int index, int numParams)
     {
         std::lock_guard<std::mutex> lock(mMutex);
         if (index < 0 || index >= (int)mPresets.size()) return;
         mPresets[index].name = "Init";
-        mPresets[index].values.assign(numParams, 0.f);
+        setInitValues(mPresets[index].values, numParams);
     }
 
     KR106Preset getPreset(int index) const

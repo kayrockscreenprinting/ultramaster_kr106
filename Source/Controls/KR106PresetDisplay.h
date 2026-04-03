@@ -297,12 +297,14 @@ private:
     {
         if (!mProcessor || mSheet) return;
 
-        auto* editor = findParentComponentOfClass<juce::AudioProcessorEditor>();
-        juce::Component* target = editor ? static_cast<juce::Component*>(editor) : getTopLevelComponent();
+        // Attach to our immediate parent (mContent) so the sheet
+        // inherits the content transform and uses base dimensions.
+        juce::Component* target = getParentComponent();
+        if (!target) target = getTopLevelComponent();
         if (!target) return;
 
-        int sheetH = target->getHeight();
         int sheetW = target->getWidth();
+        int sheetH = target->getHeight();
         int sheetY = 0;
 
         mSheet = std::make_unique<KR106PresetSheet>(mProcessor, mTypeface,
@@ -341,9 +343,9 @@ private:
         items.push_back(KR106MenuItem::makeAction(7, "Show in Files"));
       #endif
 
-        juce::Component* editor = findParentComponentOfClass<juce::AudioProcessorEditor>();
-        if (!editor) editor = getTopLevelComponent();
-        if (!editor) return;
+        juce::Component* target = getParentComponent();
+        if (!target) target = getTopLevelComponent();
+        if (!target) return;
 
         juce::Component::SafePointer<KR106PresetDisplay> safeThis(this);
         mContextMenu = std::make_unique<KR106MenuSheet>(std::move(items), mTypeface,
@@ -364,11 +366,11 @@ private:
 
         int menuH = mContextMenu->calcHeight();
         int menuW = mContextMenu->calcWidth();
-        auto displayInEditor = editor->getLocalArea(this, getLocalBounds());
-        int menuX = displayInEditor.getX() - menuW;
-        int menuY = (editor->getHeight() - menuH) / 2;
+        auto displayInTarget = target->getLocalArea(this, getLocalBounds());
+        int menuX = displayInTarget.getX() - menuW;
+        int menuY = (target->getHeight() - menuH) / 2;
 
-        editor->addAndMakeVisible(mContextMenu.get());
+        target->addAndMakeVisible(mContextMenu.get());
         mContextMenu->showAt({ menuX, menuY, menuW, menuH });
     }
 

@@ -16,8 +16,12 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
         p.mUIScale = mUIScale; // persist so it survives window recreation
     }
 
-    setSize(940, 224);
-    triggerAsyncUpdate(); // defer scale to next message loop (after host finishes parenting)
+    // Content wrapper: all controls are children of this component.
+    // We apply the UI scale transform to mContent, leaving the editor's
+    // own transform free for the host's DPI scaling (setScaleFactor).
+    addAndMakeVisible(mContent);
+    mContent.setInterceptsMouseClicks(false, true); // pass clicks through, but let children handle theirs
+    mContent.setBounds(0, 0, kBaseWidth, kBaseHeight);
 
     // Load @2x images from binary data
     auto loadImg = [](const void* data, int size) {
@@ -51,7 +55,7 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
     // Automatically wires up MIDI learn for sliders that have a param.
     auto add = [&](auto* ctrl, int x, int y, int w, int h) {
         ctrl->setBounds(x, y, w, h);
-        addAndMakeVisible(ctrl);
+        mContent.addAndMakeVisible(ctrl);
         mControls.add(ctrl);
         return ctrl;
     };
@@ -94,10 +98,12 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
 
     add(new KR106Switch(param(kArpMode),  switchV, 3), 175, 46, 9, 24);
     add(new KR106Switch(param(kArpRange), switchV, 3), 212, 46, 9, 24);
-    addSlider(kArpRate, new KR106ArpRateSlider(param(kArpRate), tip, sliderHdl, &p.mArpSyncHost), 227, 33, 19, 49);
+    mArpRateSlider = new KR106ArpRateSlider(param(kArpRate), param(kArpQuantize), kArpRate, kArpQuantize, tip, sliderHdl, &p.mArpSyncHost);
+    addSlider(kArpRate, mArpRateSlider, 227, 33, 19, 49);
 
     // === LFO SECTION ===
-    addSlider(kLfoRate, new KR106LfoRateSlider(param(kLfoRate), tip, sliderHdl, &p.mLfoSyncHost), 249, 33, 20, 49)->setExtraRight(1);
+    mLfoRateSlider = new KR106LfoRateSlider(param(kLfoRate), param(kLfoQuantize), kLfoRate, kLfoQuantize, tip, sliderHdl, &p.mLfoSyncHost);
+    addSlider(kLfoRate, mLfoRateSlider, 249, 33, 20, 49)->setExtraRight(1);
     addSlider(kLfoDelay, new KR106Slider(param(kLfoDelay), tip, sliderHdl), 267, 33, 19, 49);
     add(new KR106Switch(param(kLfoMode), switchV, 2),   294, 46,  9, 24);
 
@@ -182,32 +188,34 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
         BinaryData::Segment14_otf, BinaryData::Segment14_otfSize);
 
     // Tooltip overlay — added last so it paints on top of all controls
-    addAndMakeVisible(mTooltip);
+    mContent.addAndMakeVisible(mTooltip);
     mTooltip.setVisible(false);
     mTooltip.setAlwaysOnTop(true);
 
+    // Apply initial scale via setSize (triggers resized -> mContent transform)
+    applyScale(mUIScale);
 
     startTimerHz(30);
 }
 
 KR106Editor::~KR106Editor()
 {
-    cancelPendingUpdate();
     stopTimer();
 }
 
-void KR106Editor::handleAsyncUpdate()
+void KR106Editor::resized()
 {
-    if (mUIScale != 1.f)
-    {
-        setTransform(juce::AffineTransform::scale(mUIScale));
-        // Force componentMovedOrResized with wasResized=true so the
-        // LV2/CLAP wrapper calls requestResize() with transformed bounds.
-        // setTransform alone doesn't trigger this because the logical
-        // size (getWidth/getHeight) doesn't change.
-        setSize(940, 223);
-        setSize(940, 224);
-    }
+    float scale = static_cast<float>(getWidth()) / kBaseWidth;
+    mContent.setTransform(juce::AffineTransform::scale(scale));
+    mContent.setBounds(0, 0, kBaseWidth, kBaseHeight);
+}
+
+void KR106Editor::applyScale(float s)
+{
+    mUIScale = s;
+    mProcessor.mUIScale = s;
+    setSize(juce::roundToInt(kBaseWidth * s),
+            juce::roundToInt(kBaseHeight * s));
 }
 
 void KR106Editor::mouseDown(const juce::MouseEvent& e)
@@ -258,16 +266,7 @@ void KR106Editor::showSettingsMenu()
             if (r == 0) { mSettingsMenu.reset(); return; }
             float s = r == 1 ? 1.f : r == 2 ? 1.5f : r == 3 ? 2.f : 0.f;
             if (s > 0.f && s != mUIScale)
-            {
-                mUIScale = s;
-                mProcessor.mUIScale = s;
-                if (s == 1.f)
-                    setTransform({});
-                else
-                    setTransform(juce::AffineTransform::scale(s));
-                setSize(940, 223);
-                setSize(940, 224);
-            }
+                applyScale(s);
             // Voice count and oversample: set via parameter system
             int voices = r == 10 ? 6 : r == 11 ? 8 : r == 12 ? 10 : 0;
             if (voices > 0 && voices != mProcessor.mVoiceCount)
@@ -310,10 +309,10 @@ void KR106Editor::showSettingsMenu()
 
     int menuH = mSettingsMenu->calcHeight();
     int menuW = mSettingsMenu->calcWidth();
-    int menuX = (getWidth() - menuW) / 2;
-    int menuY = (getHeight() - menuH) / 2;
+    int menuX = (kBaseWidth - menuW) / 2;
+    int menuY = (kBaseHeight - menuH) / 2;
 
-    addAndMakeVisible(mSettingsMenu.get());
+    mContent.addAndMakeVisible(mSettingsMenu.get());
     mSettingsMenu->showAt({ menuX, menuY, menuW, menuH });
 }
 
@@ -330,10 +329,10 @@ void KR106Editor::showVarianceSheet()
 
     int sheetW = mVarianceSheet->calcWidth();
     int sheetH = mVarianceSheet->calcHeight();
-    int sheetX = (getWidth() - sheetW) / 2;
-    int sheetY = (getHeight() - sheetH) / 2;
+    int sheetX = (kBaseWidth - sheetW) / 2;
+    int sheetY = (kBaseHeight - sheetH) / 2;
 
-    addAndMakeVisible(mVarianceSheet.get());
+    mContent.addAndMakeVisible(mVarianceSheet.get());
     mVarianceSheet->showAt({ sheetX, sheetY, sheetW, sheetH });
 }
 
@@ -356,9 +355,9 @@ void KR106Editor::showQwertyDiagram()
     auto* overlay = new Overlay();
     overlay->onClose = [this]() { mQwertyDiagram.reset(); };
     overlay->diagram.onClose = [this]() { mQwertyDiagram.reset(); };
-    overlay->setBounds(getLocalBounds());
+    overlay->setBounds(0, 0, kBaseWidth, kBaseHeight);
     overlay->setAlwaysOnTop(true);
-    addAndMakeVisible(overlay);
+    mContent.addAndMakeVisible(overlay);
     mQwertyDiagram.reset(overlay);
 }
 
@@ -573,9 +572,9 @@ bool KR106Editor::keyStateChanged(bool /*isKeyDown*/)
 
 void KR106Editor::paint(juce::Graphics& g)
 {
-    // Draw @2x background at 1x logical size
+    // Draw @2x background scaled to fill the editor
     g.drawImage(mBackground,
-                0.f, 0.f, 940.f, 224.f,
+                0.f, 0.f, (float)getWidth(), (float)getHeight(),
                 0, 0, mBackground.getWidth(), mBackground.getHeight());
 }
 
@@ -628,6 +627,10 @@ void KR106Editor::timerCallback()
             mProcessor.saveGlobalSettings();
         }
     }
+
+    // Swap rate slider params when sync state changes
+    mArpRateSlider->updateSyncState();
+    mLfoRateSlider->updateSyncState();
 
     // Update scope, keyboard, and clip LED from processor state
     mScope->updateFromProcessor();

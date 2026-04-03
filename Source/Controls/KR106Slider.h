@@ -412,9 +412,28 @@ private:
 class KR106ArpRateSlider : public KR106Slider
 {
 public:
-  KR106ArpRateSlider(juce::RangedAudioParameter* param, KR106Tooltip* tip,
+  KR106ArpRateSlider(juce::RangedAudioParameter* rateParam,
+                     juce::RangedAudioParameter* quantizeParam,
+                     int rateParamIdx, int quantizeParamIdx,
+                     KR106Tooltip* tip,
                      const juce::Image& handleImg, bool* syncFlag)
-    : KR106Slider(param, tip, handleImg), mSyncFlag(syncFlag) {}
+    : KR106Slider(rateParam, tip, handleImg),
+      mRateParam(rateParam), mQuantizeParam(quantizeParam),
+      mRateParamIdx(rateParamIdx), mQuantizeParamIdx(quantizeParamIdx),
+      mSyncFlag(syncFlag) {}
+
+  // Call from OnIdle to swap the active param when sync state changes
+  void updateSyncState()
+  {
+    bool synced = mSyncFlag && *mSyncFlag;
+    auto* wanted = synced ? mQuantizeParam : mRateParam;
+    if (wanted != mParam)
+    {
+      mParam = wanted;
+      mParamIdx = synced ? mQuantizeParamIdx : mRateParamIdx;
+      repaint();
+    }
+  }
 
   void paintTickMarks(juce::Graphics& g) override
   {
@@ -469,6 +488,10 @@ public:
   }
 
 private:
+  juce::RangedAudioParameter* mRateParam = nullptr;
+  juce::RangedAudioParameter* mQuantizeParam = nullptr;
+  int mRateParamIdx = -1;
+  int mQuantizeParamIdx = -1;
   bool* mSyncFlag = nullptr;
 };
 
@@ -478,9 +501,27 @@ private:
 class KR106LfoRateSlider : public KR106Slider
 {
 public:
-  KR106LfoRateSlider(juce::RangedAudioParameter* param, KR106Tooltip* tip,
+  KR106LfoRateSlider(juce::RangedAudioParameter* rateParam,
+                     juce::RangedAudioParameter* quantizeParam,
+                     int rateParamIdx, int quantizeParamIdx,
+                     KR106Tooltip* tip,
                      const juce::Image& handleImg, bool* syncFlag)
-    : KR106Slider(param, tip, handleImg), mSyncFlag(syncFlag) {}
+    : KR106Slider(rateParam, tip, handleImg),
+      mRateParam(rateParam), mQuantizeParam(quantizeParam),
+      mRateParamIdx(rateParamIdx), mQuantizeParamIdx(quantizeParamIdx),
+      mSyncFlag(syncFlag) {}
+
+  void updateSyncState()
+  {
+    bool synced = mSyncFlag && *mSyncFlag;
+    auto* wanted = synced ? mQuantizeParam : mRateParam;
+    if (wanted != mParam)
+    {
+      mParam = wanted;
+      mParamIdx = synced ? mQuantizeParamIdx : mRateParamIdx;
+      repaint();
+    }
+  }
 
   void paintTickMarks(juce::Graphics& g) override
   {
@@ -546,5 +587,9 @@ public:
   }
 
 private:
+  juce::RangedAudioParameter* mRateParam = nullptr;
+  juce::RangedAudioParameter* mQuantizeParam = nullptr;
+  int mRateParamIdx = -1;
+  int mQuantizeParamIdx = -1;
   bool* mSyncFlag = nullptr;
 };

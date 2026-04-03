@@ -29,6 +29,7 @@ static bool isLivePerformanceParam(int idx)
          idx == kMasterVol || idx == kBender || idx == kBenderDco || idx == kBenderVcf ||
          idx == kBenderLfo || idx == kPower ||
          idx == kAdsrMode ||  // mode selects the bank, not a preset parameter
+         idx == kArpQuantize || idx == kLfoQuantize ||
          (idx >= kSettingVoices && idx <= kSettingMidiSysEx);
 }
 
@@ -197,21 +198,10 @@ KR106AudioProcessor::KR106AudioProcessor()
     float hz = juce::jlimit(1.f, 20000.f, parseHz(text));
     return bsearch([isJ6](float v) { return PV::vcfFreqHz(v, isJ6()); }, hz);
   };
-  SFV fmtLfoRate = [this, isJ6](float v, int) -> juce::String {
-    if (mLfoSyncHost)
-    {
-      int d = kr106::lfoDivisionFromSlider(v);
-      return juce::String(kr106::kLfoDivNames[d]);
-    }
+  SFV fmtLfoRate = [isJ6](float v, int) -> juce::String {
     return juce::String(PV::lfoRateHz(v, isJ6()), 1) + " Hz";
   };
-  VFS parseLfoRate = [this, bsearch, parseHz, isJ6](const juce::String& text) -> float {
-    if (mLfoSyncHost)
-    {
-      for (int d = 0; d < kr106::kNumLfoDivisions; d++)
-        if (text.trim().equalsIgnoreCase(kr106::kLfoDivNames[d]))
-          return kr106::sliderFromLfoDivision(d);
-    }
+  VFS parseLfoRate = [bsearch, parseHz, isJ6](const juce::String& text) -> float {
     return bsearch([isJ6](float v) { return PV::lfoRateHz(v, isJ6()); }, parseHz(text));
   };
   SFV fmtLfoDelay = [](float v, int) {
@@ -283,22 +273,10 @@ KR106AudioProcessor::KR106AudioProcessor()
   addSlider(kBenderLfo,  "Bender LFO",  0.f, 0.f, 1.f, fmtPct, parsePct);
 
   addSlider(kArpRate, "Arp Rate", 30.f/128.f, 0.f, 1.f,
-    [this](float v, int) -> juce::String {
-      if (mArpSyncHost)
-      {
-        int d = kr106::divisionFromSlider(v);
-        return juce::String(kr106::kDivNames[d]);
-      }
+    [](float v, int) -> juce::String {
       return juce::String(juce::roundToInt(PV::arpRateBpm(v))) + " bpm";
     },
-    [this, bsearch](const juce::String& text) -> float {
-      // When synced, try to match division name
-      if (mArpSyncHost)
-      {
-        for (int d = 0; d < kr106::kNumArpDivisions; d++)
-          if (text.trim().equalsIgnoreCase(kr106::kDivNames[d]))
-            return kr106::sliderFromDivision(d);
-      }
+    [bsearch](const juce::String& text) -> float {
       return bsearch([](float v) { return kr106::Arpeggiator::arpRate(v); },
                      text.getFloatValue());
     });
@@ -418,6 +396,10 @@ KR106AudioProcessor::KR106AudioProcessor()
   addBool(kSettingLfoSync,       "LFO Sync Host",      false);
   addBool(kSettingMonoRetrig,    "Mono Retrigger",     true);
   addBool(kSettingMidiSysEx,     "MIDI SysEx",         false);
+  addSwitch(kArpQuantize,        "Arp Quantize",       kr106::kDiv16, 0, kr106::kNumArpDivisions - 1,
+    [](int v, int) { return juce::String(kr106::kDivNames[v]); });
+  addSwitch(kLfoQuantize,        "LFO Quantize",       kr106::kLfoDiv4, 0, kr106::kNumLfoDivisions - 1,
+    [](int v, int) { return juce::String(kr106::kLfoDivNames[v]); });
 
   // Build factory presets from compiled-in data (raw 7-bit integer values)
   constexpr int kFactoryValues = sizeof(KR106FactoryPreset::values) / sizeof(int);
@@ -722,8 +704,19 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
            + " vel=" + juce::String(msg.getVelocity())
            + " samplePos=" + juce::String(meta.samplePosition)
            + " blockSize=" + juce::String(nFrames));
-      mDSP.NoteOn(msg.getNoteNumber(), msg.getVelocity());
-      mKeyboardHeld.set(msg.getNoteNumber());
+
+      // Transpose mode: MIDI note sets transpose offset instead of playing
+      if (mParams[kTranspose]->getValue() > 0.5f)
+      {
+        int offset = msg.getNoteNumber() - 60;
+        mParams[kTransposeOffset]->setValueNotifyingHost(
+            mParams[kTransposeOffset]->convertTo0to1(static_cast<float>(offset)));
+      }
+      else
+      {
+        mDSP.NoteOn(msg.getNoteNumber(), msg.getVelocity());
+        mKeyboardHeld.set(msg.getNoteNumber());
+      }
     }
     else if (msg.isNoteOff())
     {
@@ -1246,6 +1239,23 @@ void KR106AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     float val = stream.readFloat();
     if (mParams[i] != nullptr)
       mParams[i]->setValueNotifyingHost(mParams[i]->convertTo0to1(val));
+  }
+
+  // Backwards compat: old states lack quantize params. Derive from saved
+  // slider positions so existing sync users keep their division settings.
+  if (numParams <= kArpQuantize && mParams[kArpRate] && mParams[kArpQuantize])
+  {
+    float rateVal = mParams[kArpRate]->convertFrom0to1(mParams[kArpRate]->getValue());
+    int div = kr106::divisionFromSlider(rateVal);
+    mParams[kArpQuantize]->setValueNotifyingHost(
+      mParams[kArpQuantize]->convertTo0to1(static_cast<float>(div)));
+  }
+  if (numParams <= kLfoQuantize && mParams[kLfoRate] && mParams[kLfoQuantize])
+  {
+    float rateVal = mParams[kLfoRate]->convertFrom0to1(mParams[kLfoRate]->getValue());
+    int div = kr106::lfoDivisionFromSlider(rateVal);
+    mParams[kLfoQuantize]->setValueNotifyingHost(
+      mParams[kLfoQuantize]->convertTo0to1(static_cast<float>(div)));
   }
 
   // Read UI state if present (magic marker check for backwards compatibility)

@@ -178,6 +178,17 @@ public:
                 changed = true;
             }
         }
+        // Sync transpose chevron from parameter (e.g. MIDI set transpose)
+        auto* tp = mProcessor->getParam(kTransposeOffset);
+        if (tp)
+        {
+            int offset = static_cast<int>(tp->convertFrom0to1(tp->getValue()));
+            int key = offset + 60 - kMinNote;
+            int newKey = (key >= 0 && key < kNumKeys) ? key : -1;
+            if (offset == 0) newKey = -1;
+            if (newKey != mTransposeKey) { mTransposeKey = newKey; changed = true; }
+        }
+
         if (changed)
             repaint();
     }

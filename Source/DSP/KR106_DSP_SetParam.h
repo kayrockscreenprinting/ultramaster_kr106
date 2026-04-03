@@ -19,7 +19,12 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     kPortaMode, kPortaRate,
     kTransposeOffset, kBenderLfo,
     kAdsrMode,
-    kMasterVol
+    kMasterVol,
+    kSettingVoices, kSettingOversample, kSettingIgnoreVel,
+    kSettingArpLimitKbd, kSettingArpSync, kSettingLfoSync,
+    kSettingMonoRetrig, kSettingMidiSysEx,
+    kArpQuantize,
+    kLfoQuantize
   };
 
   switch (paramIdx)
@@ -234,7 +239,9 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     case kLfoRate:
       mSliderLfoRate = static_cast<float>(value);
       mLFO.SetRate(mSliderLfoRate, mSampleRate);
-      mLFO.mDivision = kr106::lfoDivisionFromSlider(mSliderLfoRate);
+      break;
+    case kLfoQuantize:
+      mLFO.mDivision = std::max(0, std::min(static_cast<int>(value), static_cast<int>(kr106::kNumLfoDivisions) - 1));
       break;
     case kLfoDelay:
       mSliderLfoDelay = static_cast<float>(value);
@@ -344,7 +351,9 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     case kArpRate:
       mSliderArpRate = static_cast<float>(value);
       mArp.mRate = kr106::Arpeggiator::arpRate(mSliderArpRate);
-      mArp.mDivision = kr106::divisionFromSlider(mSliderArpRate);
+      break;
+    case kArpQuantize:
+      mArp.mDivision = std::max(0, std::min(static_cast<int>(value), static_cast<int>(kr106::kNumArpDivisions) - 1));
       break;
     case kArpMode: mArp.mMode = static_cast<int>(value); mArp.mStepIndex = 0; mArp.mDirection = 1; break;
     case kArpRange: mArp.mRange = static_cast<int>(value); break;
