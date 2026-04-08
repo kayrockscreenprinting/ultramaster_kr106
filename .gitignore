@@ -56,6 +56,7 @@ docs/edition_images/
 # VCF development variants
 Source/DSP/KR106VCFv*.h
 Source/DSP/KR106VCF_*.h
+!Source/DSP/KR106VCF_OPTIMIZED.h
 Source/DSP/_KR106VCF.h
 
 # Analysis output

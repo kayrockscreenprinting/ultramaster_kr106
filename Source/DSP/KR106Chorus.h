@@ -6,60 +6,54 @@
 
 // KR-106 BBD Chorus Emulation
 //
-// Architecture (from Juno-6 schematic + measurements, March 2026):
+// Architecture (from Juno-6 schematic + measurements, March–April 2026):
 //
-// The Juno-6 chorus uses two BBD delay lines mixed with dry signal.
+// The Juno-6 chorus uses two MN3009 BBD delay lines mixed with dry signal.
 // Each output jack has an IC6 inverting summer combining dry (100K/47K)
 // and wet (100K/39K). "Mono" jack = dry + tap 0, "Stereo" jack = dry + tap 1.
-// A single triangle-wave LFO drives both MN3009 BBD clock VCOs in antiphase:
-//   tap0 clock = center_clock + lfo(t) * clock_depth
-//   tap1 clock = center_clock - lfo(t) * clock_depth
+// A single LFO drives both BBD clock generators in antiphase, modulating
+// delay time symmetrically around the center.
 //
-// Delay is an emergent inverse property of clock frequency:
-//   delay = N_stages / (2 * f_clock)
-// This produces a hyperbolic sweep in delay space — the delay lingers at
-// long values (closely-spaced comb notches, deeper cancellation) and sweeps
-// quickly through short delays. A symmetric triangle in clock-frequency
-// space becomes asymmetric in delay-time space.
+// The MN3009 BBD is a 256-stage analog shift register; delay is set by the
+// external clock via delay = N_stages / (2 * f_clock). The MN3101 clock
+// generator is driven externally from a ~5-transistor V→f converter that
+// takes the LFO voltage as input. The 1/f relationship of the BBD combined
+// with the V→f circuit's nonlinearity produces an empirically LINEAR
+// delay trajectory — verified by Hilbert-transform analysis of 200Hz
+// self-osc recordings through the chorus.
 //
-// Mode switching (SW4/SW5) selects resistor values in the LFO circuit,
-// changing rate and clock excursion simultaneously. From schematic:
-//   I:    triangle, 20 Vpp, 2.5s period (0.4 Hz)
-//   II:   triangle, 20 Vpp, 1.5s period (0.67 Hz)
-//   I+II: sine,     2.6 Vpp, 124ms period (8 Hz) — vibrato character
+// For that reason this model computes delay directly from the LFO and
+// derives the BBD clock from delay. The hardware's V→f circuit is
+// implicitly pre-compensating for the 1/f delay math, and modeling it
+// in the delay domain is simpler than trying to match the curve of the
+// V→f circuit explicitly.
 //
-// Measured parameters (Chorus I, 496 Hz sine, Juno-6 serial# unknown):
-//   LFO rate:  0.45 Hz (confirmed triangle, antiphase at -179°)
-//   BBD gain:  ~3-5 dB over dry level
-//   BBD bandwidth: gentle rolloff (-3 dB at ~10 kHz)
+// Measured parameters (J6 hw, 200 Hz self-osc carrier, Hilbert analysis):
+//   Chorus I   : triangle LFO, 0.413 Hz (2.422s period), delay swing 4.66 ms pp
+//   Chorus II  : triangle LFO, 0.797 Hz (1.254s period), delay swing 4.64 ms pp
+//   Chorus I+II: sine LFO,     7.86 Hz (0.127s period),  delay swing 0.40 ms pp
 //
 // Anti-aliasing and reconstruction filters (Tr13/Tr14 and Tr15/Tr16):
 //   Two identical 2-transistor active filter stages (2SA1015 PNP emitter
-//   followers), one before and one after each MN3009. ngspice simulation
-//   shows the emitter followers' low output impedance (~43 ohms) makes the
-//   shunt caps transparent, producing a Butterworth-like response rather
-//   than a gradual 4-pole rolloff. See BBDFilter.h for details.
-//   -3 dB at 9,661 Hz, flat through 5 kHz, -22 dB/oct stopband.
+//   followers), one before and one after each MN3009. See BBDFilter.h.
+//   −3 dB at 9,661 Hz, flat through 5 kHz, −22 dB/oct stopband.
 //
-// Clock depth derived from measured delay maximum (~6.2ms for modes I/II).
-// Center clock ≈ 42,667 Hz (from 3.0ms center delay).
-// Mode I/II: clock sweeps ±22 kHz → delay 1.98ms–6.20ms (asymmetric).
-// Mode I+II: clock sweeps ±5.2 kHz → delay 2.67ms–3.42ms (vibrato).
+// BBD gain modulation: measured 1.36x amplitude ratio between LFO extremes
+// on Chorus I. Attributed to clock-rate-dependent MN3009 transfer efficiency
+// and MN3101 Vgg bias tracking. Modeled as anti-phase gain modulation on
+// each wet path, scaled proportionally to delay swing (so C1+II's tiny
+// excursion produces proportionally tiny gain modulation).
 
 namespace kr106 {
 
 // ============================================================
 // LFO — triangle or sine, single oscillator
 // ============================================================
-struct ChorusLFO
-{
+struct ChorusLFO {
   float mPhase = 0.f; // [0, 1)
   float mInc = 0.f;
 
-  void SetRate(float hz, float sampleRate)
-  {
-    mInc = hz / sampleRate;
-  }
+  void SetRate(float hz, float sampleRate) { mInc = hz / sampleRate; }
 
   void Reset() { mPhase = 0.f; }
 
@@ -86,163 +80,140 @@ struct ChorusLFO
 // ============================================================
 // BBD delay line — one MN3009 signal path
 // ============================================================
-struct BBDLine
-{
+struct BBDLine {
   static constexpr int kNumStages = 256; // MN3009
 
-  std::vector<float> mBuf;
-  int mMask = 0;
-  int mWPos = 0;
+  // Quadratic charge-transfer nonlinearity (signal-dependent asymmetry).
+  // Real MN3009 THD ~1-2%, dominated by 2nd harmonic. 0.02-0.08 plausible.
+  static constexpr float kBBDNonlin = 0.00f;
 
-  // 4-pole pre/post filters (matched anti-aliasing + reconstruction pair)
+  // True BBD shift register: 256 analog sample-and-hold stages.
+  // Clocked at a variable rate (~20-65 kHz), not at the audio sample rate.
+  float mStages[kNumStages] = {};
+  int mWriteIdx = 0; // next stage to write (circular)
+
+  // Clock accumulator: advances at 2*clockHz/sampleRate per audio sample.
+  // clockHz is data-sheet f_clk; ticks happen at 2*f_clk because each
+  // f_clk period advances 2 stages (two-phase BBD clocking).
+  float mClockPhase = 0.f;
+
+  // Sample-and-hold output: holds last clocked value between ticks
+  float mHeldOutput = 0.f;
+
+  // Matched anti-aliasing + reconstruction filter pair
   BBDFilter mPreFilter;
   BBDFilter mPostFilter;
-
-  // No BBD ZOH filter needed: the MN3009 staircase output has a
-  // sinc(f/f_clock) envelope, but that only matters at ~43 kHz
-  // (the MN3101 clock frequency), which is well above audio band.
-  // We don't model the clock noise, so there's nothing to filter.
 
   float mSampleRate = 44100.f;
 
   void Init(float sampleRate)
   {
     mSampleRate = sampleRate;
-
-    // Buffer: max delay ~10ms + interpolation margin
-    int minLen = static_cast<int>(sampleRate * 0.012f) + 4;
-    int len = 1;
-    while (len < minLen) len <<= 1;
-    mBuf.assign(len, 0.f);
-    mMask = len - 1;
-    mWPos = 0;
-
+    mClockPhase = 0.f;
+    mWriteIdx = 0;
+    mHeldOutput = 0.f;
+    std::fill(std::begin(mStages), std::end(mStages), 0.f);
     mPreFilter.Init(sampleRate);
     mPostFilter.Init(sampleRate);
   }
 
   void Clear()
   {
-    std::fill(mBuf.begin(), mBuf.end(), 0.f);
-    mWPos = 0;
+    std::fill(std::begin(mStages), std::end(mStages), 0.f);
+    mWriteIdx = 0;
+    mClockPhase = 0.f;
+    mHeldOutput = 0.f;
     mPreFilter.Reset();
     mPostFilter.Reset();
   }
 
-  // 4-point Hermite interpolation for fractional delay
-  static float Hermite(float frac, float y0, float y1, float y2, float y3)
+  // Process one audio-rate sample. clockHz is the data-sheet f_clk.
+  float Process(float input, float clockHz)
   {
-    float c0 = y1;
-    float c1 = 0.5f * (y2 - y0);
-    float c2 = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
-    float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
-    return ((c3 * frac + c2) * frac + c1) * frac + c0;
-  }
-
-  float ReadHermite(float delaySamples) const
-  {
-    float rPos = static_cast<float>(mWPos) - delaySamples;
-    if (rPos < 0.f) rPos += static_cast<float>(mMask + 1);
-
-    int i1 = static_cast<int>(rPos);
-    float frac = rPos - static_cast<float>(i1);
-
-    return Hermite(frac,
-      mBuf[(i1 - 1) & mMask],
-      mBuf[i1 & mMask],
-      mBuf[(i1 + 1) & mMask],
-      mBuf[(i1 + 2) & mMask]);
-  }
-
-  float Process(float input, float delaySamples)
-  {
-    // 1. Pre-filter (4-pole anti-aliasing: 10.6k / 8.8k / 7.2k / 4.0k Hz)
     float filtered = mPreFilter.Process(input);
 
-    // 2. Write to delay buffer
-    mBuf[mWPos & mMask] = filtered;
+    // Tick at 2*f_clk (two-phase BBD clocking: one f_clk period = 2 stages)
+    float clockInc = (2.f * clockHz) / mSampleRate;
+    mClockPhase += clockInc;
 
-    // 3. Read with Hermite interpolation
-    float wet = ReadHermite(delaySamples);
+    while (mClockPhase >= 1.f)
+    {
+      mClockPhase -= 1.f;
+      // Read oldest sample (N ticks old, about to be overwritten)
+      mHeldOutput = mStages[mWriteIdx];
+      // Write newest with quadratic nonlinearity
+      const float x = filtered;
+      mStages[mWriteIdx] = x + kBBDNonlin * x * x;
+      mWriteIdx = (mWriteIdx + 1) % kNumStages;
+    }
 
-    // 4. Advance write position
-    mWPos = (mWPos + 1) & mMask;
-
-    // 5. Post-filter (4-pole reconstruction, matched to pre-filter)
-    wet = mPostFilter.Process(wet);
-
-    return wet;
+    return mPostFilter.Process(mHeldOutput);
   }
 };
 
 // ============================================================
 // Stereo Chorus
 // ============================================================
-struct Chorus
-{
+struct Chorus {
   BBDLine mLine0, mLine1;
-  ChorusLFO mLFO;          // single LFO — L gets +output, R gets -output
-  int mMode = 0;           // 0=off, 1=I, 2=II, 3=I+II
-  int mPendingMode = 0;    // deferred mode for click-free mode-to-mode switches
-  bool mUseSine = false;   // true for mode I+II (8 Hz vibrato)
+  ChorusLFO mLFO;
+  int mMode = 0;         // 0=off, 1=I, 2=II, 3=I+II
+  int mPendingMode = 0;  // deferred mode for click-free mode-to-mode switches
+  bool mUseSine = false; // true for mode I+II (sine LFO vibrato)
   float mSampleRate = 44100.f;
 
-  // From schematic annotations + measurement:
-  //
-  // Center delay: nominal 3.0 ms (typical MN3009 chorus operating point).
-  // Gives BBD clock ~43 kHz, Nyquist ~10.7 kHz — consistent with
-  // measured -3 dB at ~10 kHz.
-  static constexpr float kCenterDelayMs = 3.0f;
+  // Center delay: 3.2 ms. Derived from matching hardware C1+2/C2 RMS ratio
+  // at 200 Hz (hw 0.679, solves to effective τ ≈ 3.29 ms via comb filter
+  // transfer |0.719 + 0.866·e^(-jωτ)| against C2's sweep-averaged |H| ≈ 1.125).
+  // Rounded to 3.2 ms. This is close to the nominal MN3009 operating point.
+  static constexpr float kCenterDelayMs = 3.2f;
 
-  // Center clock frequency derived from center delay:
-  // f_clock = N_stages / (2 * delay_sec) = 256 / (2 * 0.003) ≈ 42,667 Hz
-  static constexpr float kCenterClockHz =
-      static_cast<float>(BBDLine::kNumStages) / (2.f * kCenterDelayMs * 0.001f);
-
-  // Floor clock freq — prevents delay exceeding buffer length
+  // Floor clock — prevents runaway delay at extremes
   static constexpr float kMinClockHz = 5000.f;
 
-  // Mode I: measured 0.45 Hz, schematic says 0.4 Hz / 2.5s.
-  // Mode II: schematic says 0.67 Hz / 1.5s.
-  // Both at 20 Vpp — same clock excursion.
-  static constexpr float kChorusIRate  = 0.45f;
-  static constexpr float kChorusIIRate = 0.67f;
+  // LFO rates (measured from J6 hardware, Hilbert analysis of 200Hz carrier)
+  static constexpr float kChorusIRate = 0.413f;   // was schematic 0.4
+  static constexpr float kChorusIIRate = 0.797f;  // was schematic 0.67
+  static constexpr float kChorusI_IIRate = 8.00f; // measured 7.86, close enough
 
-  // Clock depth in Hz — derived from measured delay maxima.
-  // LFO modulates clock VCO, delay is inverse: delay = N/(2*f_clock).
-  // clock_depth = kCenterClockHz - N/(2 * delay_max_sec)
-  //
-  // Mode I/II: delay_max ≈ 6.2ms → clock_min ≈ 20,645 Hz
-  // clock_depth ≈ 22,022 Hz; gives delay_min ≈ 1.98ms
-  static constexpr float kChorusIClockDepth = kCenterClockHz
-      - static_cast<float>(BBDLine::kNumStages) / (2.f * 0.0062f);
-  static constexpr float kChorusIIClockDepth = kChorusIClockDepth; // same Vpp
-
-  // Mode I+II: 8 Hz sine, 2.6 Vpp = 0.13x of 20 Vpp.
-  // delay_max ≈ 3.42ms → clock_depth ≈ 5,240 Hz
-  // Pitch vibrato, not traditional chorus.
-  static constexpr float kChorusI_IIRate  = 8.0f;
-  static constexpr float kChorusI_IIClockDepth = kCenterClockHz
-      - static_cast<float>(BBDLine::kNumStages) / (2.f * 0.00342f);
+  // Delay swing half-amplitudes (pp = 2 * this)
+  // Measured: C1 = 4.66, C2 = 4.64, C1+II = 0.40 ms pp
+  static constexpr float kChorusIDelayDepthMs = 2.33f;    // pp 4.66
+  static constexpr float kChorusIIDelayDepthMs = 2.32f;   // pp 4.64
+  static constexpr float kChorusI_IIDelayDepthMs = 0.15f; // pp 0.40 (vibrato)
 
   // Dry/wet mix from schematic: IC6 inverting summer per channel.
   //   Dry: -R70/R71 = -100K/47K = gain 2.128
   //   Wet: -R70/R72 = -100K/39K = gain 2.564
-  // Measured chorus ON vs OFF: ~3-5 dB boost (using +4 dB midpoint = 1.585x).
-  // Resistor ratio sets dry:wet balance, total scaled to match measured boost.
-  static constexpr float kChorusBoost = 1.585f;  // +4 dB measured ON vs OFF
+  // Measured chorus ON vs OFF: ~3-5 dB boost (+4 dB midpoint = 1.585x).
+  static constexpr float kChorusBoost = 1.585f;
   static constexpr float kDryGain = 2.128f / (2.128f + 2.564f) * kChorusBoost; // 0.719
   static constexpr float kWetGain = 2.564f / (2.128f + 2.564f) * kChorusBoost; // 0.866
 
-  // Crossfade for mode switching (avoids clicks)
+  // Clock-rate-dependent BBD gain. Measured 1.36x ratio on Chorus I
+  // (g ≈ 0.153 → (1+g)/(1-g) ≈ 1.36). This is calibrated to the C1 delay
+  // swing and is scaled automatically for other modes via mGainModScale.
+  // Each BBD has its own LFO sign → gains anti-phase → LFO-rate amp pan.
+  static constexpr float kBBDGainModC1 = 0.153f;
+
+  // Per-BBD clock-rate trim. Real MN3009 timing networks have ±5% cap
+  // and ±1% resistor tolerances; two BBDs are never identical. Matters
+  // for mono summing (prevents artificial deterministic cancellations).
+  static constexpr float kBBDClockTrim = 0.015f; // ±1.5% → 3% between lines
+
+  // Per-BBD transfer efficiency trim (MN3009 unit-to-unit variation)
+  static constexpr float kBBDGainTrim = 0.04f; // ±4%
+
+  // Crossfade for mode on/off (avoids clicks)
   static constexpr float kFadeMs = 5.f;
   float mFade = 0.f;
   float mFadeTarget = 0.f;
   float mFadeInc = 0.f;
 
-  // Smoothed clock depth (Hz) for mode transitions
-  float mClockDepth = 0.f;
-  float mTargetClockDepth = 0.f;
+  // Smoothed per-mode parameters (avoid discontinuities on mode switch)
+  float mDelayDepth = 0.f;
+  float mTargetDelayDepth = 0.f;
+  float mGainModScale = 1.f; // scales kBBDGainModC1 by (mode_depth / C1_depth)
 
   void Init(float sampleRate)
   {
@@ -256,7 +227,7 @@ struct Chorus
     if (mMode > 0)
     {
       ConfigureMode();
-      mClockDepth = mTargetClockDepth;
+      mDelayDepth = mTargetDelayDepth;
       mFade = mFadeTarget = 1.f;
     }
   }
@@ -297,67 +268,67 @@ struct Chorus
   void Process(float input, float& outL, float& outR)
   {
     // Crossfade
-    if (mFade < mFadeTarget)
-      mFade = std::min(mFade + mFadeInc, mFadeTarget);
-    else if (mFade > mFadeTarget)
-      mFade = std::max(mFade - mFadeInc, mFadeTarget);
+    if (mFade < mFadeTarget) mFade = std::min(mFade + mFadeInc, mFadeTarget);
+    else if (mFade > mFadeTarget) mFade = std::max(mFade - mFadeInc, mFadeTarget);
 
-    // When fade reaches zero, apply any pending mode switch
+    // Apply pending mode switch once fade hits zero
     if (mFade <= 0.f && mPendingMode != mMode)
     {
       mMode = mPendingMode;
       if (mMode > 0)
       {
         ConfigureMode();
-        mClockDepth = mTargetClockDepth;
+        mDelayDepth = mTargetDelayDepth;
         mFadeTarget = 1.f;
       }
     }
 
-    // Always write to delay lines and keep filter state warm
-    // so chorus engages without clicks.
+    // Bypass: keep filters/LFO warm so chorus engages without clicks
     if (mFade <= 0.f)
     {
-      if (mLine0.mBuf.empty()) { outL = outR = input; return; }
-      mLine0.mBuf[mLine0.mWPos & mLine0.mMask] = input;
-      mLine0.mWPos = (mLine0.mWPos + 1) & mLine0.mMask;
-      mLine1.mBuf[mLine1.mWPos & mLine1.mMask] = input;
-      mLine1.mWPos = (mLine1.mWPos + 1) & mLine1.mMask;
       mLine0.mPreFilter.SetState(input);
       mLine0.mPostFilter.SetState(input);
       mLine1.mPreFilter.SetState(input);
       mLine1.mPostFilter.SetState(input);
-      // Keep LFO running so phase is arbitrary on engage (no click)
       mLFO.mPhase += mLFO.mInc;
       if (mLFO.mPhase >= 1.f) mLFO.mPhase -= 1.f;
       outL = outR = input;
       return;
     }
 
-    // Smooth clock depth
-    mClockDepth += (mTargetClockDepth - mClockDepth) * mFadeInc;
+    // Smooth delay depth across mode transitions
+    mDelayDepth += (mTargetDelayDepth - mDelayDepth) * mFadeInc;
 
     // Single LFO, antiphase for L/R
     float lfo = mUseSine ? mLFO.Sine() : mLFO.Triangle();
 
-    // LFO modulates clock frequency — physically correct for BBD.
-    // Delay is the inverse: delay = N_stages / (2 * f_clock).
-    // This produces a hyperbolic sweep in delay space: lingers at
-    // long delays (deep comb notches) and zips through short delays.
-    float clock0 = kCenterClockHz + mClockDepth * lfo;
-    float clock1 = kCenterClockHz - mClockDepth * lfo;
+    // Delay-domain modulation (linear in LFO). Clock is derived from delay.
+    // This matches the measured J6 trajectory, implicitly absorbing the
+    // V→f circuit's pre-compensation for the 1/f BBD delay relationship.
+    float delay0Ms = kCenterDelayMs + mDelayDepth * lfo;
+    float delay1Ms = kCenterDelayMs - mDelayDepth * lfo;
+
+    float clock0 = static_cast<float>(BBDLine::kNumStages) / (2.f * delay0Ms * 0.001f);
+    float clock1 = static_cast<float>(BBDLine::kNumStages) / (2.f * delay1Ms * 0.001f);
+
+    // Per-BBD clock trim (humanizes mono mix)
+    clock0 *= (1.f + kBBDClockTrim);
+    clock1 *= (1.f - kBBDClockTrim);
+
     clock0 = std::max(clock0, kMinClockHz);
     clock1 = std::max(clock1, kMinClockHz);
 
-    constexpr float kHalfStages = static_cast<float>(BBDLine::kNumStages) * 0.5f;
-    float delay0samp = kHalfStages / clock0 * mSampleRate;
-    float delay1samp = kHalfStages / clock1 * mSampleRate;
+    float wet0 = mLine0.Process(input, clock0);
+    float wet1 = mLine1.Process(input, clock1);
 
-    float wet0 = mLine0.Process(input, delay0samp);
-    float wet1 = mLine1.Process(input, delay1samp);
+    // Clock-rate-dependent BBD gain (anti-phase, scaled to mode depth)
+    float gMod = kBBDGainModC1 * mGainModScale;
+    float gain0 = (1.f + kBBDGainTrim) * (1.f + gMod * lfo);
+    float gain1 = (1.f - kBBDGainTrim) * (1.f - gMod * lfo);
+    wet0 *= gain0;
+    wet1 *= gain1;
 
-    // Inverting summer: dry×(100K/47K) + wet×(100K/39K), normalized.
-    // Crossfade from bypass (dry only) to schematic mix.
+    // Inverting summer per channel: L = dry + wet0, R = dry + wet1.
     float dryMix = 1.f - mFade * (1.f - kDryGain);
     float wetMix = mFade * kWetGain;
     outL = dryMix * input + wetMix * wet0;
@@ -371,17 +342,20 @@ private:
     {
       case 1:
         mLFO.SetRate(kChorusIRate, mSampleRate);
-        mTargetClockDepth = kChorusIClockDepth;
+        mTargetDelayDepth = kChorusIDelayDepthMs;
+        mGainModScale = 1.f; // C1 is the reference
         mUseSine = false;
         break;
       case 2:
         mLFO.SetRate(kChorusIIRate, mSampleRate);
-        mTargetClockDepth = kChorusIIClockDepth;
+        mTargetDelayDepth = kChorusIIDelayDepthMs;
+        mGainModScale = kChorusIIDelayDepthMs / kChorusIDelayDepthMs;
         mUseSine = false;
         break;
       case 3:
         mLFO.SetRate(kChorusI_IIRate, mSampleRate);
-        mTargetClockDepth = kChorusI_IIClockDepth;
+        mTargetDelayDepth = kChorusI_IIDelayDepthMs;
+        mGainModScale = kChorusI_IIDelayDepthMs / kChorusIDelayDepthMs;
         mUseSine = true;
         break;
     }
