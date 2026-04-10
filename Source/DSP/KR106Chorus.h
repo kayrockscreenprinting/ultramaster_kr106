@@ -157,6 +157,7 @@ struct BBDLine {
   // Matched anti-aliasing + reconstruction filter pair
   BBDFilter mPreFilter;
   BBDFilter mPostFilter;
+  static constexpr float kBBDSatDrive = 2.58f;  // measured J6 hardware soft saturation
 
   float mSampleRate = 44100.f;
 
@@ -215,6 +216,7 @@ struct BBDLine {
   {
     // 1. Pre-filter (matched anti-aliasing stage, Tr13/Tr14 model)
    float filtered = mPreFilter.Process(input);
+   float sat = tanhf(filtered * kBBDSatDrive) / kBBDSatDrive;  // BBD saturates its input
 
     // 2. Write to delay buffer
     mBuf[mWPos & mMask] = filtered;
@@ -266,21 +268,21 @@ static constexpr float kCenterDelayMs = 3.30f;   // was 3.20f
   // have not been re-verified against clean recordings; treat as
   // provisional until re-measured.
   static constexpr float kChorusIRate    = 0.393f; // verified J6
-  static constexpr float kChorusIIRate   = 0.797f; // provisional, needs re-verification
-  static constexpr float kChorusI_IIRate = 8.00f;  // provisional, needs re-verification
+  static constexpr float kChorusIIRate   = 0.842f; // verified J6
+  static constexpr float kChorusI_IIRate = 7.85f;  // verified J6
 
   // Chorus I delay swing: ±2.13 ms half-amplitude (4.26 ms pp).
   // Measured from same click data — linear triangle trajectory verified
   // (residual 16 μs RMS against linear fit, no detectable exponential
   // curvature from the V→f converter).
   static constexpr float kChorusIDelayDepthMs = 2.13f;  
-  static constexpr float kChorusIIDelayDepthMs = 2.13f;
+  static constexpr float kChorusIIDelayDepthMs = 1.71f;
 
   // Delay swing half-amplitudes (pp = 2 * this). Measured from hardware
   // Hilbert analysis; C1 value is consistent with clean envelope extremes
   // at 137 Hz and 1 kHz. C2 and C1+II values inherited along with their
   // LFO rates — provisional pending re-measurement.
-  static constexpr float kChorusI_IIDelayDepthMs = 0.15f; // pp 0.40, provisional vibrato
+  static constexpr float kChorusI_IIDelayDepthMs = 0.236f; 
 
   // Dry and wet path gains at the IC6 summer output. Solved from hardware
   // envelope extremes of a 137 Hz sine through Chorus I on J6:

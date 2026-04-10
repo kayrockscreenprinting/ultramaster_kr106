@@ -366,7 +366,7 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
     case kArpQuantize:
       mArp.mDivision = std::max(0, std::min(static_cast<int>(value), static_cast<int>(kr106::kNumArpDivisions) - 1));
       break;
-    case kArpMode: mArp.mMode = static_cast<int>(value); mArp.mStepIndex = 0; mArp.mDirection = 1; break;
+    case kArpMode: mArp.mMode = static_cast<int>(value); break;
     case kArpRange: mArp.mRange = static_cast<int>(value); break;
     case kArpeggio: {
       bool wasEnabled = mArp.mEnabled;
@@ -381,11 +381,19 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       }
       else if (!mArp.mEnabled && wasEnabled)
       {
-        if (mArp.mLastNote >= 0) { SendToSynth(mArp.mLastNote, false, 0); mArp.mLastNote = -1; }
+        // Transfer arp's held notes back to synth hold without retriggering.
+        // The arp's last note is already sounding — just let it sustain.
         if (mHold)
         {
           mHeldNotes.reset();
-          for (int n : mArp.mHeldNotes) { SendToSynth(n, true, 127); mHeldNotes.set(n); }
+          for (int n : mArp.mHeldNotes) mHeldNotes.set(n);
+          // Keep the last arp note sounding (don't send NoteOff)
+          mArp.mLastNote = -1;
+        }
+        else if (mArp.mLastNote >= 0)
+        {
+          SendToSynth(mArp.mLastNote, false, 0);
+          mArp.mLastNote = -1;
         }
         mArp.Reset();
       }
