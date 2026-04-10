@@ -53,6 +53,7 @@ public:
         }
 
         // Preset entries
+        bool searching = mSearchString.isNotEmpty();
         for (int i = 0; i < num && i < kCols * kRows; i++)
         {
             int col = i % kCols;
@@ -62,8 +63,28 @@ public:
             int cellH = juce::roundToInt((row + 1) * rh) - y;
 
             juce::String name = mProcessor->getProgramName(i);
-            KR106Theme::drawCell(g, name.substring(0, 16), x, y, colW, cellH,
-                                 i == mHoverIndex, i == current);
+            bool matches = !searching || name.containsIgnoreCase(mSearchString);
+
+            if (matches)
+            {
+                KR106Theme::drawCell(g, name.substring(0, 16), x, y, colW, cellH,
+                                     i == mHoverIndex, i == current);
+            }
+            else
+            {
+                // Dimmed: no hover highlight, disabled text color
+                if (i == current)
+                {
+                    g.setColour(KR106Theme::disabled());
+                    g.fillRect(x + 1, y + 1, colW - 1, cellH - 1);
+                    g.setColour(KR106Theme::bg());
+                }
+                else
+                {
+                    g.setColour(KR106Theme::disabled());
+                }
+                g.drawSingleLineText(name.substring(0, 16), x + kPadX, y + cellH - KR106Theme::kTextOffset);
+            }
         }
 
         g.setColour(KR106Theme::border());
@@ -131,38 +152,103 @@ public:
         int maxIdx = std::min(num, kCols * kRows) - 1;
         if (maxIdx < 0) return false;
 
+        // Escape: clear search first, then dismiss
+        if (key == juce::KeyPress::escapeKey)
+        {
+            if (mSearchString.isNotEmpty())
+            {
+                mSearchString.clear();
+                repaint();
+                return true;
+            }
+            dismiss();
+            return true;
+        }
+
+        // Backspace: delete last search character
+        if (key == juce::KeyPress::backspaceKey)
+        {
+            if (mSearchString.isNotEmpty())
+            {
+                mSearchString = mSearchString.dropLastCharacters(1);
+                repaint();
+            }
+            return true;
+        }
+
+        // Enter: select current hover and dismiss
+        if (key == juce::KeyPress::returnKey)
+        {
+            if (mHoverIndex >= 0)
+                mProcessor->setCurrentProgram(mHoverIndex);
+            dismiss();
+            return true;
+        }
+
         // Initialize nav index from current preset if not yet navigating
         if (mHoverIndex < 0)
             mHoverIndex = mProcessor->getCurrentProgram();
 
-        int col = mHoverIndex % kCols;
-        int row = mHoverIndex / kCols;
-
-        if (key == juce::KeyPress::leftKey)
-            col = (col - 1 + kCols) % kCols;
-        else if (key == juce::KeyPress::rightKey)
-            col = (col + 1) % kCols;
-        else if (key == juce::KeyPress::upKey)
-            row = (row - 1 + kRows) % kRows;
-        else if (key == juce::KeyPress::downKey)
-            row = (row + 1) % kRows;
-        else if (key == juce::KeyPress::returnKey)
+        bool isUpDown = false, isLeftRight = false;
+        int dir = 0;
+        if (key == juce::KeyPress::leftKey)       { dir = -1;     isLeftRight = true; }
+        else if (key == juce::KeyPress::rightKey)  { dir = 1;      isLeftRight = true; }
+        else if (key == juce::KeyPress::upKey)     { dir = -kCols; isUpDown = true; }
+        else if (key == juce::KeyPress::downKey)   { dir = kCols;  isUpDown = true; }
+        else
         {
-            mProcessor->setCurrentProgram(mHoverIndex);
-            dismiss();
-            return true;
+            // Printable character: append to search string
+            auto ch = key.getTextCharacter();
+            if (ch >= ' ' && ch < 127)
+            {
+                mSearchString += juce::String::charToString(ch);
+                // Snap hover to first match
+                if (mSearchString.isNotEmpty())
+                    mHoverIndex = findNextMatch(0, 1, num);
+                repaint();
+                return true;
+            }
+            return false;
         }
-        else if (key == juce::KeyPress::escapeKey)
+
+        // Navigate, skipping non-matching presets when searching
+        if (mSearchString.isNotEmpty())
         {
-            dismiss();
-            return true;
+            if (isLeftRight)
+            {
+                // Linear scan through all matches
+                int next = findNextMatch(mHoverIndex + dir, dir, num);
+                if (next >= 0) mHoverIndex = next;
+            }
+            else
+            {
+                // Stay in same column, step by kCols
+                int col = mHoverIndex % kCols;
+                int step = (dir > 0) ? kCols : -kCols;
+                int start = mHoverIndex;
+                for (int i = 0; i < kRows; i++)
+                {
+                    start = ((start + step) % num + num) % num;
+                    // Snap back to same column after wrapping
+                    start = (start / kCols) * kCols + col;
+                    if (start >= 0 && start < num && presetMatches(start))
+                    {
+                        mHoverIndex = start;
+                        break;
+                    }
+                }
+            }
         }
         else
-            return false;
-
-        int newIdx = row * kCols + col;
-        if (newIdx > maxIdx) newIdx = maxIdx;
-        mHoverIndex = newIdx;
+        {
+            int col = mHoverIndex % kCols;
+            int row = mHoverIndex / kCols;
+            if (isLeftRight) col = ((col + dir) + kCols) % kCols;
+            else             row = ((row + dir / kCols) + kRows) % kRows;
+            int newIdx = row * kCols + col;
+            if (newIdx > maxIdx) newIdx = maxIdx;
+            mHoverIndex = newIdx;
+        }
         repaint();
         return true;
     }
@@ -187,8 +273,30 @@ private:
         return (idx >= 0 && idx < num) ? idx : -1;
     }
 
+    bool presetMatches(int idx) const
+    {
+        if (mSearchString.isEmpty()) return true;
+        if (!mProcessor) return false;
+        return mProcessor->getProgramName(idx).containsIgnoreCase(mSearchString);
+    }
+
+    // Find the next matching preset starting from idx, stepping by step (+1 or -1).
+    // Wraps around once. Returns -1 if no match.
+    int findNextMatch(int idx, int step, int num) const
+    {
+        if (num <= 0) return -1;
+        idx = ((idx % num) + num) % num;
+        for (int i = 0; i < num; i++)
+        {
+            if (presetMatches(idx)) return idx;
+            idx = ((idx + step) % num + num) % num;
+        }
+        return -1;
+    }
+
     void dismiss()
     {
+        mSearchString.clear();
         setVisible(false);
         if (mOnClose) mOnClose();
     }
@@ -198,6 +306,7 @@ private:
     std::function<void()> mOnClose;
     int mHoverIndex = -1;
     bool mHoverClose = false;
+    juce::String mSearchString;
 };
 
 // ============================================================================
@@ -304,7 +413,7 @@ private:
         if (!target) return;
 
         int sheetW = target->getWidth();
-        int sheetH = target->getHeight() - 8; // leave space for logic's resize grip
+        int sheetH = target->getHeight();
         int sheetY = 0;
 
         mSheet = std::make_unique<KR106PresetSheet>(mProcessor, mTypeface,
