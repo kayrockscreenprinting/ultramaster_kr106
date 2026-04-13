@@ -92,6 +92,9 @@ public:
   uint16_t mVcfDacNext    = 0;     // current tick's DAC output
   float mVcfDacSmooth     = 0.f;   // RC-smoothed DAC value (before expo conversion)
   float mDacSmoothCoeff   = 0.f;   // one-pole coefficient for DAC/env smoothing
+  float mPwSmooth         = 0.5f;  // RC-smoothed pulse width (models .01uF cap on PWM CV)
+  float mDcoPitchSmooth   = 0.f;   // RC-smoothed DCO pitch CV (models .01uF cap on DCO CV)
+  float mVcfResSmooth     = 0.f;   // RC-smoothed VCF resonance CV (models .01uF cap on RES CV)
 
   // J106 integer parameter cache (set by SetParam, avoids per-sample conversion)
   uint16_t mVcfCutoffInt  = 0;     // 14-bit slider value (0x0000–0x3F80)
@@ -817,6 +820,7 @@ public:
       }
 
       float lfo = lfoBuffer ? static_cast<float>(lfoBuffer[i]) : 0.f;
+      float lfoRaw = lfoRawBuffer ? static_cast<float>(lfoRawBuffer[i]) : 0.f;
       float env;
 
       if (mModel != kJ106)
@@ -826,12 +830,11 @@ public:
       else
       {
         // J106: unified firmware tick drives ADSR + VCF DAC together.
-        float rawLfo = lfoRawBuffer ? static_cast<float>(lfoRawBuffer[i]) : 0.f;
         mFwTickAccum += mFwTickStep;
         while (mFwTickAccum >= 1.f)
         {
           mFwTickAccum -= 1.f;
-          FirmwareTick(rawLfo);
+          FirmwareTick(lfoRaw);
         }
         // RC smooth the stairstepped DAC output (1ms tau)
         mFwEnvSmooth += (mFwEnvNext - mFwEnvSmooth) * mDacSmoothCoeff;
@@ -845,7 +848,10 @@ public:
       switch (mPwmMode)
       {
         case -1:
-          pw = mDcoPwm * (lfo + 1.f) * 0.5f;
+          // PWM uses raw LFO directly, not onset-enveloped.
+          // ROM $0761-$0788: lfoVal used unconditionally, onset envelope
+          // ($FF5A) only gates pitch/VCF depth scalars, not PWM path.
+          pw = mDcoPwm * (lfoRaw + 1.f) * 0.5f;
           break; // LFO
         case 0:
           pw = mDcoPwm;
@@ -861,6 +867,10 @@ public:
       float pwMax = 0.95f + mPwMaxOffset; // [0.93, 0.97]
       pw          = pwMin + pw * (pwMax - pwMin);
 
+      // RC smooth the PWM CV (hardware: .01uF cap before non-inverting op amp)
+      mPwSmooth += (pw - mPwSmooth) * mDacSmoothCoeff;
+      pw = mPwSmooth;
+
       // --- Pitch modulation ---
       // mDcoLfo is in semitones (from dcoLfoDepth6/106).
       float lfoSemitones = lfo * (mDcoLfo + mBenderModAmt * mBendLfo);
@@ -868,6 +878,10 @@ public:
           mOctTranspose / 12.f + mPitchOffset + lfoSemitones / 12.f + mRawBend * mBendDco;
       float freq = baseFreq * powf(2.f, pitchMod);
       float cps  = freq / mSampleRate;
+
+      // RC smooth the DCO pitch CV (hardware: .01uF cap before non-inverting op amp)
+      mDcoPitchSmooth += (cps - mDcoPitchSmooth) * mDacSmoothCoeff;
+      cps = mDcoPitchSmooth;
 
       // Safety clamp
       if (cps <= 0.f || cps >= 0.5f)
@@ -921,7 +935,9 @@ public:
       // Noise mixed from shared source (single generator, matches hardware)
       if (noiseAT > 0.f)
         oscOut += static_cast<float>(noiseBuffer[i]) * mOsc.mNoiseAmp * noiseAT;
-      float signal = mVCF.Process(oscOut, vcfCPS, mVcfRes);
+      // RC smooth the resonance CV (hardware: .01uF cap before non-inverting op amp)
+      mVcfResSmooth += (mVcfRes - mVcfResSmooth) * mDacSmoothCoeff;
+      float signal = mVCF.Process(oscOut, vcfCPS, mVcfResSmooth);
 
       // --- VCA (BA662 OTA, driven by model-specific exponential converter) ---
       // RC smooth the gate envelope (same 1ms DAC output filter as ADSR)

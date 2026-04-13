@@ -262,16 +262,16 @@ struct VCF
   static constexpr float kFCFreq[20] = {0.f,14.f,28.f,32.f,36.f,40.f,44.f,48.f,52.f,56.f,60.f,64.f,68.f,72.f,76.f,80.f,84.f,98.f,112.f,127.f};
   static constexpr float kFCRes[10] = {0.f,14.f,28.f,42.f,56.f,70.f,84.f,98.f,112.f,127.f};
   static constexpr float kFCTable[10][20] = {
-    {0.99f, 1.12f, 0.95f, 0.97f, 0.92f, 0.94f, 0.95f, 0.93f, 0.92f, 0.93f, 0.95f, 0.93f, 0.92f, 0.90f, 0.98f, 0.94f, 0.95f, 0.92f, 0.96f, 1.00f},  // R=0
-    {1.00f, 1.08f, 0.99f, 0.98f, 0.98f, 0.97f, 0.97f, 0.99f, 1.01f, 1.03f, 1.08f, 1.14f, 1.18f, 1.22f, 1.25f, 1.25f, 1.25f, 1.10f, 1.00f, 1.00f},  // R=14
-    {1.05f, 1.21f, 0.99f, 1.01f, 1.02f, 1.04f, 1.05f, 1.07f, 1.08f, 1.09f, 1.14f, 1.19f, 1.22f, 1.25f, 1.25f, 1.25f, 1.25f, 1.10f, 1.02f, 1.00f},  // R=28
-    {1.06f, 1.06f, 1.13f, 1.09f, 1.05f, 1.00f, 1.01f, 1.07f, 1.13f, 1.19f, 1.21f, 1.24f, 1.26f, 1.25f, 1.21f, 1.17f, 1.13f, 1.09f, 1.06f, 1.00f},  // R=42
-    {0.91f, 0.95f, 1.07f, 1.05f, 1.04f, 1.02f, 1.02f, 1.04f, 1.05f, 1.07f, 1.10f, 1.12f, 1.15f, 1.16f, 1.16f, 1.16f, 1.16f, 1.08f, 1.00f, 1.00f},  // R=56
-    {1.01f, 1.05f, 1.09f, 1.06f, 1.03f, 1.01f, 1.01f, 1.04f, 1.07f, 1.10f, 1.09f, 1.09f, 1.09f, 1.08f, 1.08f, 1.07f, 1.06f, 1.02f, 0.98f, 1.00f},  // R=70
-    {0.97f, 1.07f, 1.03f, 1.01f, 0.99f, 0.96f, 0.97f, 0.99f, 1.02f, 1.04f, 1.07f, 1.11f, 1.14f, 1.14f, 1.10f, 1.07f, 1.03f, 1.01f, 0.98f, 1.00f},  // R=84
-    {1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f},  // R=98  (resonance peak dominates; blend -> 1.0)
-    {1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f},  // R=112 (resonance peak dominates; blend -> 1.0)
-    {1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f},  // R=127 (resonance peak dominates; blend -> 1.0)
+    {0.96f, 0.96f, 0.96f, 0.91f, 0.86f, 0.81f, 0.79f, 0.78f, 0.78f, 0.78f, 0.83f, 0.87f, 0.91f, 0.96f, 1.00f, 1.04f, 1.09f, 1.09f, 1.09f, 1.09f},  // R=0
+    {0.94f, 0.94f, 0.94f, 0.92f, 0.90f, 0.88f, 0.87f, 0.87f, 0.86f, 0.85f, 0.87f, 0.89f, 0.90f, 0.90f, 0.88f, 0.85f, 0.83f, 0.83f, 0.83f, 0.83f},  // R=14
+    {0.96f, 0.96f, 0.96f, 0.92f, 0.89f, 0.86f, 0.85f, 0.87f, 0.88f, 0.90f, 0.93f, 0.97f, 1.00f, 1.00f, 0.95f, 0.91f, 0.87f, 0.87f, 0.87f, 0.87f},  // R=28
+    {1.02f, 1.02f, 1.02f, 0.98f, 0.94f, 0.91f, 0.89f, 0.90f, 0.91f, 0.92f, 0.93f, 0.95f, 0.96f, 0.96f, 0.94f, 0.92f, 0.90f, 0.90f, 0.90f, 0.90f},  // R=42
+    {0.96f, 0.96f, 0.96f, 0.95f, 0.93f, 0.92f, 0.91f, 0.92f, 0.93f, 0.94f, 0.96f, 0.98f, 1.00f, 0.99f, 0.97f, 0.94f, 0.91f, 0.91f, 0.91f, 0.91f},  // R=56
+    {0.99f, 0.99f, 0.99f, 0.96f, 0.94f, 0.91f, 0.91f, 0.92f, 0.93f, 0.94f, 0.93f, 0.92f, 0.92f, 0.91f, 0.91f, 0.92f, 0.92f, 0.92f, 0.92f, 0.92f},  // R=70
+    {0.98f, 0.98f, 0.98f, 0.96f, 0.94f, 0.91f, 0.90f, 0.91f, 0.91f, 0.91f, 0.93f, 0.94f, 0.95f, 0.95f, 0.93f, 0.92f, 0.90f, 0.90f, 0.90f, 0.90f},  // R=84
+    {1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f},  // R=98  (high res: -3dB unreliable)
+    {1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f},  // R=112 (high res: -3dB unreliable)
+    {1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f},  // R=127 (high res: -3dB unreliable)
   };
 
   // Convert normalized frequency (frq = hz / Nyquist) to equivalent VCF byte
@@ -311,13 +311,7 @@ struct VCF
     float bot = v01 + (v11 - v01) * ff;
     float tableVal = top + (bot - top) * fr;
 
-    // At high resonance, the table data is unreliable because the
-    // resonance peak distorts the -3dB measurement. Blend toward 1.0
-    // as resonance increases -- the resonance peak dominates the response
-    // and the cascade droop correction is less relevant.
-    // k reaches ~4 at res byte ~80; blend reaches 1.0 there.
-    float blend = std::min(k * k * 0.0625f, 1.f);
-    return tableVal + blend * (1.f - tableVal);
+    return tableVal;
   }
 
   // Soft-clip resonance above k=3.0 (OTA gain compression at high feedback).
@@ -345,8 +339,18 @@ struct VCF
 
   static float FreqGain(float frq)
   {
-    float fg = powf(std::max(frq, 1e-6f) * (1.f / 0.00445f), -0.10f);
-    return std::clamp(fg, 0.65f, 1.2f);
+    // Bell curve in log-frequency space. Attenuates input gain at both
+    // low and high cutoff frequencies, peak near 1 kHz. Empirically
+    // tuned from A/B preset comparison against hardware recordings --
+    // matches level across all 128 factory presets, but the physical
+    // basis is not fully understood. Possibly OTA bias current effects
+    // at low cutoff and bandwidth rolloff at high cutoff.
+    float logFrq = logf(std::max(frq, 1e-6f));
+    static constexpr float kCenter = -3.9f;  // ln(0.02) ≈ -3.9 (~1 kHz at 96k)
+    static constexpr float kSigma  = 2.5f;   // width in log units
+    float d = (logFrq - kCenter) / kSigma;
+    float fg = expf(-0.5f * d * d);
+    return std::max(0.25f, fg);
   }
 
   static constexpr float kOTAScaleBase = 0.35f;
@@ -407,12 +411,14 @@ struct VCF
       if (!mJ106Res) k = SoftClipK(k); // J106 quartic already saturates
 
       // Tame resonance at ultrasonic cutoff. The peak itself is inaudible
-      // but its skirt extends into the audible range and sounds harsh.
-      // Hardware bandwidth (~50 kHz) naturally limits this. Fade k to
-      // half above 24 kHz (frq 0.5 at 96k), reaching 50% at 48 kHz.
-      if (frq > 0.5f)
+      // but its skirt aliases back into the audible range.
+      // Hardware bandwidth (~50 kHz) naturally kills resonance here.
+      // Fade k from full at 20 kHz to zero at Nyquist (frq 0.95).
+      // Threshold is absolute Hz so behavior is consistent across sample rates.
+      float frqFadeStart = 20000.f / (mSampleRate * 0.5f); // 20 kHz normalized
+      if (frq > frqFadeStart)
       {
-        float fade = std::max(1.f - (frq - 0.5f) * 1.f, 0.5f);
+        float fade = std::max(1.f - (frq - frqFadeStart) / (0.95f - frqFadeStart), 0.f);
         k *= fade;
       }
 

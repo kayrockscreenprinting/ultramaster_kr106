@@ -504,7 +504,7 @@ public:
     // VCA level before chorus (matches hardware: VCA IC5 → Chorus BBD)
     for (int s = 0; s < nFrames; s++)
     {
-      mVcaLevelSmooth += (mVcaLevel - mVcaLevelSmooth) * 0.001f;
+      mVcaLevelSmooth += (mVcaLevel - mVcaLevelSmooth) * mDacSmoothCoeff;
       outputs[0][s] *= static_cast<T>(mVcaLevelSmooth);
     }
 
@@ -534,6 +534,7 @@ public:
   void Reset(double sampleRate, int blockSize)
   {
     mSampleRate = static_cast<float>(sampleRate);
+    mDacSmoothCoeff = 1.f - expf(-1.f / (0.001f * mSampleRate)); // 1ms RC tau
     mSawTables.Init(mSampleRate);
     ForEachVoice([this, sampleRate, blockSize](kr106::Voice<T>& v) {
       v.SetSampleRateAndBlockSize(sampleRate, blockSize);
@@ -625,6 +626,7 @@ public:
 
   float mVcaLevel = 1.f;
   float mVcaLevelSmooth = 1.f;
+  float mDacSmoothCoeff = 0.f;  // 1ms RC filter coefficient (shared by all CV smoothers)
   float mMasterVol = 1.f;
   float mMasterVolSmooth = 1.f;
   float mSampleRate = 44100.f;
