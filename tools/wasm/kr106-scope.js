@@ -27,6 +27,18 @@ function cycleScopeMode(dir){
 
 // Scope bounds (logical pixels)
 const SC={x:790,y:7,w:128,h:74};
+const kNavH=10; // nav bar height at bottom
+const kNavArrowW=14; // click zone for arrows
+let navHover=-1; // 0=left, 1=right, -1=none
+let scopeNavPeakDb=-100, scopeNavVcfHz=0;
+
+// Interactive scope drag state
+let scopeDragMode=0; // 0=none, 1=volume, 2=vcf, 3=adsr
+let scopeDragStartVal=[0,0];
+let scopeDragStartY=0, scopeDragStartX=0;
+let adsrDragParam=-1;
+// ADSR boundary positions (normalized 0-1), cached by drawScopeADSR
+let adsrBoundAD=0, adsrBoundDS=0, adsrBoundSR=0, adsrSustainY=0.5;
 
 function updateScopeData(){
 if(!synth.ready)return;
@@ -111,8 +123,8 @@ function scopePeakReadout(sx,sy,w,h,peakL){
 
 // ===== Mode 0: Waveform =====
 
-function drawScopeWaveform(){
-  const{x:sx,y:sy,w,h}=SC;const v2=h/2|0;
+function drawScopeWaveform(ch){
+  const{x:sx,y:sy,w}=SC;const h=ch;const v2=h/2|0;
 
   scopeCrosshairs(sx,sy,w,h);
 
@@ -141,7 +153,8 @@ function drawScopeWaveform(){
     if(Math.abs(sample)>peakL)peakL=Math.abs(sample)}
   ctx.strokeStyle='#00ff00';ctx.lineWidth=1.5;ctx.stroke();
 
-  scopePeakReadout(sx,sy,w,h,peakL);
+  scopeNavPeakDb=peakL>1e-10?20*Math.log10(peakL):-200;
+  if(scopeNavPeakDb>=0)scopeClipHold=30;else if(scopeClipHold>0)scopeClipHold--;
 }
 
 // ===== Mode 1: Spectrum (FFT) =====
@@ -179,9 +192,9 @@ function fft(re,im,n){
         const nRe=curRe*wRe-curIm*wIm;curIm=curRe*wIm+curIm*wRe;curRe=nRe}}}
 }
 
-function drawScopeSpectrum(){
+function drawScopeSpectrum(ch){
   initHann();
-  const{x:sx,y:sy,w,h}=SC;
+  const{x:sx,y:sy,w}=SC;const h=ch;
 
   // Fill FFT buffer from ring (most recent 4096 samples)
   for(let i=0;i<FFT_SIZE;i++){
@@ -222,7 +235,7 @@ function drawScopeSpectrum(){
     const mag1=Math.sqrt(fftReal[b0+1]*fftReal[b0+1]+fftImag[b0+1]*fftImag[b0+1])/numBins;
     const mag=mag0+(mag1-mag0)*bf;
     const db=mag>1e-10?20*Math.log10(mag):-200;
-    const yNorm=Math.max(0,Math.min(1,(db-dbMin)/(dbMax-dbMin)));
+    const yNorm=(db-dbMin)/(dbMax-dbMin);
     return (1-yNorm)*h}
 
   ctx.beginPath();
@@ -271,8 +284,8 @@ function adsrCalcDecay(value,coeff){
 function j6AtkTau(v){return 0.001500*Math.exp(11.7382*v-4.7207*v*v)}
 function j6DRTau(v){return 0.003577*Math.exp(12.946*v-5.0638*v*v)}
 
-function drawScopeADSR(){
-  const{x:sx,y:sy,w,h}=SC;
+function drawScopeADSR(ch){
+  const{x:sx,y:sy,w}=SC;const h=ch;
   const a=paramValues[P.envA],d=paramValues[P.envD];
   const sustain=Math.max(paramValues[P.envS],0.001),r=paramValues[P.envR];
   const isJ106=paramValues[P.adsrMode]>=0.5;
@@ -305,7 +318,7 @@ function drawScopeADSR(){
      releaseMs=ticks*1000/kTickRate}
 
     const totalMs=attackMs+decayMs+kSustainMs+releaseMs;
-    const windowMs=Math.max(500,totalMs*1.1);
+    const windowMs=Math.max(500,totalMs);
     const msAD=attackMs,msDS=attackMs+decayMs,msSR=msDS+kSustainMs;
 
     const maxTicks=Math.floor(windowMs*kTickRate/1000)+2;
@@ -352,7 +365,7 @@ function drawScopeADSR(){
     releaseMs=sustain>kThreshold?-relTau*Math.log(kThreshold/sustain)*1000:0;
 
     const totalMs=attackMs+decayMs+kSustainMs+releaseMs;
-    const windowMs=Math.max(500,totalMs*1.1);
+    const windowMs=Math.max(500,totalMs);
     const msAD=attackMs,msDS=attackMs+decayMs,msSR=msDS+kSustainMs;
 
     const numMs=Math.ceil(windowMs);
@@ -386,8 +399,14 @@ function drawScopeADSR(){
 
   // Common drawing code
   const totalMs=attackMs+decayMs+kSustainMs+releaseMs;
-  const windowMs=Math.max(500,totalMs*1.1);
+  const windowMs=Math.max(500,totalMs);
   const msAD=attackMs,msDS=attackMs+decayMs,msSR=msDS+kSustainMs;
+
+  // Cache for interactive drag
+  adsrBoundAD=msAD/windowMs;
+  adsrBoundDS=msDS/windowMs;
+  adsrBoundSR=msSR/windowMs;
+  adsrSustainY=1-sustain;
 
   // Bottom tick marks
   ctx.fillStyle='#004000';
@@ -452,8 +471,8 @@ function pbUpdateBall(){
   const idx=cy*kPBCols+cx;
   if(idx>=0&&idx<128){currentPreset=idx;synth.loadPreset(idx);syncFP(idx);drawPresetDisplay()}}
 
-function drawScopePatchBank(){
-  const{x:sx,y:sy,w,h}=SC;
+function drawScopePatchBank(ch){
+  const{x:sx,y:sy,w}=SC;const h=ch;
   const cur=currentPreset;
 
   // Grid lines
@@ -492,27 +511,6 @@ function drawScopePatchBank(){
   // Update ball each frame
   pbUpdateBall();
 
-  // Nav area: < and > below the grid
-  const navY=kPBGridH+1, navH=h-navY;
-  const half=Math.floor(w/2);
-
-  // Hover highlight
-  if(pbNavHover>=0){
-    ctx.fillStyle='#002800';
-    if(pbNavHover===0)ctx.fillRect(sx,sy+navY,half,navH);
-    else ctx.fillRect(sx+half+1,sy+navY,half-1,navH)}
-
-  // Divider
-  ctx.fillStyle='#004000';
-  ctx.fillRect(sx+half,sy+navY,1,navH);
-
-  // < arrow
-  ctx.strokeStyle='#008000';ctx.lineWidth=1;
-  let ax=half/2,ay=navY+Math.floor(navH/2);
-  ctx.beginPath();ctx.moveTo(sx+ax+3,sy+ay-3);ctx.lineTo(sx+ax,sy+ay);ctx.lineTo(sx+ax+3,sy+ay+3);ctx.stroke();
-  // > arrow
-  ax=half+half/2;
-  ctx.beginPath();ctx.moveTo(sx+ax-3,sy+ay-3);ctx.lineTo(sx+ax,sy+ay);ctx.lineTo(sx+ax-3,sy+ay+3);ctx.stroke();
 }
 
 // ===== Mode 4: VCF Frequency Response =====
@@ -530,8 +528,8 @@ function vcfFreqComp(k,frq){
   return lowQ+blend*(1-lowQ)}
 function vcfInputComp(k){return 0.252+0.058*k}
 
-function drawScopeVCF(){
-  const{x:sx,y:sy,w,h}=SC;
+function drawScopeVCF(ch){
+  const{x:sx,y:sy,w}=SC;const h=ch;
   const j6=paramValues[P.adsrMode]<0.5;
   const freqSlider=paramValues[P.vcfFreq];
   const resSlider=paramValues[P.vcfRes];
@@ -580,10 +578,12 @@ function drawScopeVCF(){
     ctx.fillStyle='#008000';
     ctx.fillRect(sx+fcX,sy,1,h)}
 
-  // Transfer function: 4-pole cascade with feedback (thin path, half-pixel steps)
-  // |H|^2 = totalComp^2 / ((1+x^2)^4 + 2k(1+x^2)^2*cos(4*atan(x)) + k^2)
-  const comp2=totalComp*totalComp;
+  // Cache for nav label
+  scopeNavVcfHz=fcSlider;
+
+  // Transfer function: 4-pole cascade with feedback, normalized to 0 dB at DC
   const k2=k*k;
+  const dcDenomSq=(1+k)*(1+k);
   function vcfY(px){
     const logF=logMin+px/(w-1)*logRange;
     const freq=Math.pow(10,logF);
@@ -594,7 +594,7 @@ function drawScopeVCF(){
     const p8=p4*p4;
     const theta4=4*Math.atan(x);
     const denomSq=p8+2*k*p4*Math.cos(theta4)+k2;
-    const magSq=comp2/denomSq;
+    const magSq=dcDenomSq/denomSq;
     const db=10*Math.log10(Math.max(magSq,1e-12));
     const dbClamped=Math.max(dbMin-12,Math.min(dbMax,db));
     return (1-(dbClamped-dbMin)/(dbMax-dbMin))*(h-1)}
@@ -635,7 +635,7 @@ let aboutFrame=0;
 
 function buildAboutPixels(w,h){
   // Rasterize text into pixel array
-  const lines=['ULTRAMASTER','KR-106','2.4.9']; // UPDATE version here on release
+  const lines=['ULTRAMASTER','KR-106','2.5.5']; // UPDATE version here on release
   const pixels=[];
   const lineH=10; // 7px glyph + 3px gap
   const totalH=lines.length*lineH;
@@ -658,8 +658,8 @@ function buildAboutPixels(w,h){
   return pixels;
 }
 
-function drawScopeAbout(){
-  const{x:sx,y:sy,w,h}=SC;
+function drawScopeAbout(ch){
+  const{x:sx,y:sy,w}=SC;const h=ch;
 
   if(!aboutPixels)aboutPixels=buildAboutPixels(w,h);
 
@@ -689,24 +689,83 @@ function drawScopeAbout(){
     ctx.fillRect(sx+bx,sy+by,1,1)}
 }
 
+// ===== Nav bar (shared across all modes) =====
+
+function scopeNavLabel(){
+  switch(scopeMode){
+    case 0:{
+      let s='WAVEFORM';
+      if(scopeNavPeakDb>-100) s+=' '+scopeNavPeakDb.toFixed(1).padStart(6)+' dB';
+      return s}
+    case 1:return 'SPECTROGRAPH';
+    case 2:return 'ENVELOPE';
+    case 3:{
+      let s='VCF';
+      if(scopeNavVcfHz>0){
+        let hz=scopeNavVcfHz>=1000?(scopeNavVcfHz/1000).toFixed(2)+' kHz':Math.round(scopeNavVcfHz)+' Hz';
+        s+=' '+hz.padStart(9)}
+      return s}
+    case 4:return 'PATCH BANK';
+    case 5:return 'ABOUT';
+    default:return ''}
+}
+
+function drawScopeNavBar(){
+  const{x:sx,y:sy,w,h}=SC;
+  const navY=h-kNavH;
+
+  // Hover highlight
+  if(navHover>=0){
+    ctx.fillStyle='#002800';
+    if(navHover===0) ctx.fillRect(sx,sy+navY,kNavArrowW,kNavH);
+    else ctx.fillRect(sx+w-kNavArrowW,sy+navY,kNavArrowW,kNavH)}
+
+  // Top border
+  ctx.fillStyle='#004000';
+  ctx.fillRect(sx,sy+navY,w,1);
+
+  // < arrow
+  ctx.strokeStyle='#008000';ctx.lineWidth=1;
+  const ay=navY+kNavH/2;
+  ctx.beginPath();ctx.moveTo(sx+5,sy+ay-3);ctx.lineTo(sx+2,sy+ay);ctx.lineTo(sx+5,sy+ay+3);ctx.stroke();
+
+  // > arrow
+  ctx.beginPath();ctx.moveTo(sx+w-5,sy+ay-3);ctx.lineTo(sx+w-2,sy+ay);ctx.lineTo(sx+w-5,sy+ay+3);ctx.stroke();
+
+  // Center label
+  ctx.fillStyle='#008000';
+  ctx.font='8px monospace';
+  ctx.textAlign='center';
+  ctx.fillText(scopeNavLabel(),sx+w/2,sy+navY+kNavH-2);
+  ctx.textAlign='left';
+}
+
 // ===== Main drawScope dispatcher =====
 
 function drawScope(){
   if(!synth.ready)return;
   updateScopeData();
   const{x:sx,y:sy,w,h}=SC;
+  const ch=h-kNavH;
 
   ctx.save();
   ctx.beginPath();ctx.rect(sx,sy,w,h);ctx.clip();
   ctx.fillStyle='#000';ctx.fillRect(sx,sy,w,h);
 
+  // Clip content area (above nav bar)
+  ctx.save();
+  ctx.beginPath();ctx.rect(sx,sy,w,ch);ctx.clip();
+
   switch(scopeMode){
-    case 0:drawScopeWaveform();break;
-    case 1:drawScopeSpectrum();break;
-    case 2:drawScopeADSR();break;
-    case 3:drawScopeVCF();break;
-    case 4:drawScopePatchBank();break;
-    case 5:drawScopeAbout();break;
+    case 0:drawScopeWaveform(ch);break;
+    case 1:drawScopeSpectrum(ch);break;
+    case 2:drawScopeADSR(ch);break;
+    case 3:drawScopeVCF(ch);break;
+    case 4:drawScopePatchBank(ch);break;
+    case 5:drawScopeAbout(ch);break;
   }
+  ctx.restore();
+
+  drawScopeNavBar();
   ctx.restore();
 }
