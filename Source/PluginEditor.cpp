@@ -251,8 +251,19 @@ KR106Editor::KR106Editor(KR106AudioProcessor& p)
     getConstrainer()->setFixedAspectRatio(
         static_cast<double>(kBaseWidth) / kBaseHeight);
 
-    // Apply initial scale via setSize (triggers resized -> mContent transform)
-    applyScale(mUIScale);
+    // Apply saved scale: set transform only (no setSize). The host will
+    // restore its own window size from project state. If the host gets it
+    // wrong (standalone, or host that doesn't save editor size), correct
+    // asynchronously after the host's initialization completes.
+    // Read the processor's authoritative scale (survives the resized() call
+    // that fires during setResizable/setResizeLimits above).
+    float savedScale = mProcessor.mUIScale > 0.f ? mProcessor.mUIScale : mUIScale;
+    applyScale(savedScale, false);
+    juce::MessageManager::callAsync([this, savedScale] {
+        float currentScale = static_cast<float>(getWidth()) / kBaseWidth;
+        if (std::abs(currentScale - savedScale) > 0.01f)
+            applyScale(savedScale);
+    });
 
     startTimerHz(30);
 }
@@ -275,7 +286,7 @@ void KR106Editor::resized()
     }
     else
     {
-        // Host-initiated resize (Logic drag-resize, window management, etc.)
+        // Host-initiated resize (drag-resize, window management, etc.)
         // Derive scale from the new editor dimensions
         scale = static_cast<float>(getWidth()) / kBaseWidth;
 
@@ -285,8 +296,12 @@ void KR106Editor::resized()
             if (std::abs(scale - preset) < 0.02f)
                 scale = preset;
 
+        // Only update local editor scale — don't write to processor or
+        // settings. The processor's mUIScale is the source of truth,
+        // set only by applyScale() (menu) or loadGlobalSettings().
+        // This prevents the host's default 1x size from overwriting
+        // the user's saved scale on editor reopen.
         mUIScale = scale;
-        mProcessor.mUIScale = scale;
         dbgResize("host: " + juce::String(getWidth()) + "x" + juce::String(getHeight())
                 + " scale=" + juce::String(scale, 2));
     }
@@ -295,14 +310,23 @@ void KR106Editor::resized()
     mContent.setBounds(0, 0, kBaseWidth, kBaseHeight);
 }
 
-void KR106Editor::applyScale(float s)
+void KR106Editor::applyScale(float s, bool resizeWindow)
 {
     mUIScale = s;
     mProcessor.mUIScale = s;
-    mInternalResize = true;
-    setSize(juce::roundToInt(kBaseWidth * s),
-            juce::roundToInt(kBaseHeight * s));
-    mInternalResize = false;
+    if (resizeWindow)
+    {
+        mInternalResize = true;
+        setSize(juce::roundToInt(kBaseWidth * s),
+                juce::roundToInt(kBaseHeight * s));
+        mInternalResize = false;
+    }
+    else
+    {
+        // State restore: just update the transform, let host handle window size.
+        mContent.setTransform(juce::AffineTransform::scale(s));
+        mContent.setBounds(0, 0, kBaseWidth, kBaseHeight);
+    }
 }
 
 
@@ -740,12 +764,9 @@ void KR106Editor::paint(juce::Graphics& g)
     // Black fill for any uncovered area (when host allows non-aspect-ratio sizes)
     g.fillAll(juce::Colours::black);
 
-    // Draw @2x background at the aspect-ratio-constrained size (matching mContent)
-    float scale = mUIScale;
-    float bgW = kBaseWidth * scale;
-    float bgH = kBaseHeight * scale;
+    // Draw @2x background at actual editor dimensions (ground truth)
     g.drawImage(mBackground,
-                0.f, 0.f, bgW, bgH,
+                0.f, 0.f, static_cast<float>(getWidth()), static_cast<float>(getHeight()),
                 0, 0, mBackground.getWidth(), mBackground.getHeight());
 }
 

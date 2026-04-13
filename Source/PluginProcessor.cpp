@@ -472,6 +472,15 @@ void KR106AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
   dbgLog("  voiceNote before Reset: [" + voicesBefore.trim() + "]");
 
   mDSP.Reset(sampleRate, samplesPerBlock);
+  mFadeInRemaining = mFadeInTotal;
+
+  // Snap volume smoothers to their targets so the first buffer doesn't
+  // ramp from the default (1.0) to the actual value, which would cause
+  // a click on the noise floor.
+  float vol = getParamValue(kMasterVol);
+  mDSP.mMasterVol = vol * vol;
+  mDSP.mMasterVolSmooth = mDSP.mMasterVol;
+  mDSP.mVcaLevelSmooth = mDSP.mVcaLevel;
 
   // Log voice allocation after Reset
   juce::String voicesAfter;
@@ -978,6 +987,19 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
   mDSP.mMasterVol = vol * vol; // audio taper (squared)
   mDSP.ProcessBlock(nullptr, outputs, nOutputs, nFrames);
 
+  // --- Fade-in on stream start to prevent click from audio device open ---
+  if (mFadeInRemaining > 0)
+  {
+    int fadeLen = std::min(mFadeInRemaining, nFrames);
+    for (int c = 0; c < nOutputs; c++)
+    {
+      float* ch = buffer.getWritePointer(c);
+      for (int i = 0; i < fadeLen; i++)
+        ch[i] *= static_cast<float>(mFadeInTotal - mFadeInRemaining + i) / mFadeInTotal;
+    }
+    mFadeInRemaining -= fadeLen;
+  }
+
   // --- Mute if power off ---
   if (!mPowerOn)
   {
@@ -1317,7 +1339,7 @@ void KR106AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
   // Read UI state if present (magic marker check for backwards compatibility)
   if (!stream.isExhausted() && stream.readInt() == 0x4B523130)
   {
-    mUIScale = stream.readFloat();
+    (void)stream.readFloat(); // consume stateScale (settings.json is authoritative for zoom)
     // Old state format stored voice count, velocity, arp limit here.
     // New format stores them as params (kSetting*), already restored above.
     // Consume leftover bytes from old format so we don't misparse.

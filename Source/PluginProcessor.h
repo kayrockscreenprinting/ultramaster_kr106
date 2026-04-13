@@ -149,6 +149,16 @@ private:
   bool mPowerOn = true;
   bool mWasJ106Mode = true; // tracks ADSR mode for HPF/VCF remap detection
 
+  // Fade-in/out to prevent clicks on audio stream open/close
+  static constexpr int mFadeInTotal = 64; // samples (~1.5ms at 44.1k)
+  int mFadeInRemaining = 0;
+  std::atomic<bool> mShouldFadeOut{false};
+  int mFadeOutRemaining = 0;
+  static constexpr int mFadeOutTotal = 64;
+
+  // Called before standalone shutdown to ramp output to zero
+  void requestFadeOut() { mShouldFadeOut.store(true, std::memory_order_release); }
+
   // UI→audio thread-safe note release queue
   static constexpr int kForceReleaseQueueSize = 64;
   int mForceReleaseQueue[kForceReleaseQueueSize] = {};

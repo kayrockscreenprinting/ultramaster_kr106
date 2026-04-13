@@ -41,7 +41,7 @@ private:
     bool mQwertyDown[128] = {};
 
     void timerCallback() override;
-    void applyScale(float s);
+    void applyScale(float s, bool resizeWindow = true);
     void advanceMidiLearn(int dir);
 
     KR106AudioProcessor& mProcessor;
