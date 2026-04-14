@@ -4,7 +4,7 @@
 let canvas, ctx;
 
 // ===== drawAll =====
-function drawAll(){ctx.save();ctx.scale(S,S);if(images.bg)ctx.drawImage(images.bg,0,0,W,H);
+function drawAll(){if(!ctx)return;ctx.save();ctx.scale(S,S);if(images.bg)ctx.drawImage(images.bg,0,0,W,H);
 const powerOn=paramValues[P.power]>0.5;
 for(const c of controls){const[p,t,x,y,e]=c;
 if(t==='slider'){const notch=(p===P.hpfFreq)?4:0;drawSlider(x,y,paramValues[p],e||0,notch)}
@@ -24,6 +24,7 @@ if(menuOpen)drawSettingsMenu()}
 
 // ===== Mouse =====
 let dragCtrl=null,dragStartY=0,dragStartVal=0,dragAccum=0,pressedBtn=-1,kbPressedKey=-1,kbDragging=false;
+let tuningInSnap=false;
 let transposeKey=-1; // keyboard index of current transpose root (-1 = none)
 let benderDragStartY=0; // vertical drag start for LFO trigger
 const kbTO=[13,27,40,54,66,79,93,103,117,128,142,154],kbBO=[22,22,44,44,66,88,88,110,110,132,132,154];
@@ -39,16 +40,16 @@ ctx=canvas.getContext('2d');
 canvas.addEventListener('mousedown',e=>{const pos=gmp(e);
 // Preset sheet click
 if(sheetOpen){
-  if(pos.x>=W-14&&pos.y<14){sheetOpen=false;drawAll();e.preventDefault();return}
+  if(pos.x>=W-14&&pos.y<14){sheetOpen=false;sheetSearch='';drawAll();e.preventDefault();return}
   const idx=sheetHitTest(pos.x,pos.y);
   if(idx>=0){currentPreset=idx;synth.loadPreset(idx);syncFP(idx)}
-  sheetOpen=false;drawAll();e.preventDefault();return}
+  sheetOpen=false;sheetSearch='';drawAll();e.preventDefault();return}
 // Settings menu click
 if(menuOpen){
-  const mw=180,mh=menuItems.length*14+8;
+  const mw=180,mh=menuItems.length*14;
   const mmx=Math.round((W-mw)/2),mmy=Math.round((H-mh)/2);
   if(pos.x>=mmx&&pos.x<mmx+mw&&pos.y>=mmy&&pos.y<mmy+mh){
-    const row=Math.floor((pos.y-mmy-4)/14);
+    const row=Math.floor((pos.y-mmy)/14);
     if(row>=0&&row<menuItems.length){
       const it=menuItems[row];
       if(it.type==='radio'){menuSettings[it.group]=it.val;applySettings()}
@@ -59,12 +60,15 @@ if(pos.x>=790&&pos.x<918&&pos.y>=86&&pos.y<100){togglePP(e);return}
 // Scope click
 if(pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h){
   const lx=pos.x-SC.x, ly=pos.y-SC.y;
+  const ch=SC.h-kNavH;
+  // Nav bar click (all modes)
+  if(ly>=ch){
+    if(lx<kNavArrowW)cycleScopeMode(-1);
+    else if(lx>=SC.w-kNavArrowW)cycleScopeMode(1);
+    drawAll();e.preventDefault();return}
+  // Patch bank mode
   if(scopeMode===4){
-    // Patch bank mode
     if(pbBallActive){pbBallActive=false;drawAll();e.preventDefault();return}
-    if(ly>=kPBGridH){
-      // Nav area: < or > cycle scope mode
-      cycleScopeMode(lx<SC.w/2?-1:1);drawAll();e.preventDefault();return}
     const idx=pbPatchAt(lx,ly);
     if(idx>=0){
       currentPreset=idx;synth.loadPreset(idx);syncFP(idx);
@@ -72,8 +76,31 @@ if(pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h){
       pbDragOriginY=Math.floor(ly/kPBCell)*kPBCell+kPBCell/2;
       pbDragEndX=lx;pbDragEndY=ly;pbDragging=true}
     drawAll();e.preventDefault();return}
-  cycleScopeMode(e.button===2?-1:1);drawAll();e.preventDefault();return}
-const key=m2k(pos.x,pos.y);if(key>=0){
+  // Interactive drags
+  scopeDragStartX=e.clientX;scopeDragStartY=e.clientY;
+  if(scopeMode===0||scopeMode===1){
+    // Waveform/spectrum: drag = master volume
+    scopeDragMode=1;scopeDragStartVal[0]=paramValues[P.masterVol]}
+  else if(scopeMode===3){
+    // VCF: direct position
+    scopeDragMode=2;
+    paramValues[P.vcfFreq]=Math.max(0,Math.min(1,lx/SC.w));
+    paramValues[P.vcfRes]=Math.max(0,Math.min(1,1-ly/ch));
+    synth.setParam(P.vcfFreq,paramValues[P.vcfFreq]);
+    synth.setParam(P.vcfRes,paramValues[P.vcfRes]);
+    if(!liveParams.has(P.vcfFreq))presetDirty=true}
+  else if(scopeMode===2){
+    // ADSR: drag boundary lines
+    const xNorm=lx/SC.w;
+    const hitZone=5/SC.w;
+    if(Math.abs(xNorm-adsrBoundAD)<hitZone){scopeDragMode=3;adsrDragParam=P.envA}
+    else if(Math.abs(xNorm-adsrBoundDS)<hitZone){scopeDragMode=3;adsrDragParam=P.envD}
+    else if(Math.abs(xNorm-adsrBoundSR)<hitZone){scopeDragMode=3;adsrDragParam=P.envR}
+    else if(xNorm>adsrBoundDS+hitZone&&xNorm<adsrBoundSR-hitZone&&Math.abs(ly/ch-adsrSustainY)<hitZone*3){
+      scopeDragMode=3;adsrDragParam=P.envS}
+    if(scopeDragMode===3)scopeDragStartVal[0]=paramValues[adsrDragParam]}
+  drawAll();e.preventDefault();return}
+const key=m2k(pos.x,pos.y);if(key>=0&&paramValues[P.power]>0.5){
   // Transpose mode: click sets transpose offset, doesn't play
   if(paramValues[P.transpose]>0.5){
     const midiNote=key+KB.minNote;
@@ -92,7 +119,7 @@ else if(t==='hswitch3'||t==='hswitch2'){dragCtrl=ci;dragStartY=e.clientX;dragSta
 else if(t==='btnled'){pressedBtn=ci;paramValues[p]=paramValues[p]>0.5?0:1;synth.setParam(p,paramValues[p]);if(!liveParams.has(p))presetDirty=true;
 if(p===P.hold&&paramValues[p]<=0.5)kbKeys.fill(0);
 drawAll()}
-else if(t==='power'){paramValues[p]=paramValues[p]>0.5?0:1;synth.setParam(p,paramValues[p]);drawAll()}
+else if(t==='power'){paramValues[p]=paramValues[p]>0.5?0:1;synth.setParam(p,paramValues[p]);if(paramValues[p]<=0.5){kbKeys.fill(0);synth.controlChange(123,0)}drawAll()}
 else if(t==='bender'){dragCtrl=ci;dragStartY=e.clientX;dragStartVal=paramValues[p];benderDragStartY=e.clientY;benderTriggered=false}
 else if(t==='chorusoff'){pressedBtn=ci;paramValues[P.chorusI]=0;paramValues[P.chorusII]=0;synth.setParam(P.chorusI,0);synth.setParam(P.chorusII,0);if(!liveParams.has(p))presetDirty=true;drawAll()}
 else if(t==='gear'){menuOpen=!menuOpen;menuHover=-1;drawAll()}
@@ -132,26 +159,64 @@ if(sheetOpen){const pos=gmp(e);
   const idx=overClose?-2:sheetHitTest(pos.x,pos.y);
   if(idx!==sheetHover){sheetHover=idx;drawPresetSheet()}tip().style.display='none';tipCtrl=-1;return}
 if(menuOpen){const pos=gmp(e);
-  const mw=180,mh=menuItems.length*14+8;
+  const mw=180,mh=menuItems.length*14;
   const mmx=Math.round((W-mw)/2),mmy=Math.round((H-mh)/2);
   let row=-1;
-  if(pos.x>=mmx+4&&pos.x<mmx+mw-4&&pos.y>=mmy+4&&pos.y<mmy+mh-4)
-    row=Math.floor((pos.y-mmy-4)/14);
+  if(pos.x>=mmx&&pos.x<mmx+mw&&pos.y>=mmy&&pos.y<mmy+mh)
+    row=Math.floor((pos.y-mmy)/14);
   if(row>=0&&row<menuItems.length&&(menuItems[row].type==='sep'||menuItems[row].type==='label'))row=-1;
   if(row!==menuHover){menuHover=row;drawSettingsMenu()}
   tip().style.display='none';tipCtrl=-1;return}
 if(dragCtrl!==null){showTip(dragCtrl);return}
 const pos=gmp(e);
-// Patch bank nav hover
-if(scopeMode===4&&pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h){
+// Scope nav hover (all modes)
+if(pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h){
   const ly=pos.y-SC.y,lx=pos.x-SC.x;
-  const nh=(ly>=kPBGridH)?(lx<SC.w/2?0:1):-1;
-  if(nh!==pbNavHover){pbNavHover=nh;drawAll()}}
-else if(pbNavHover>=0){pbNavHover=-1;drawAll()}
+  const ch=SC.h-kNavH;
+  let nh=-1;
+  if(ly>=ch) nh=lx<kNavArrowW?0:(lx>=SC.w-kNavArrowW?1:-1);
+  if(nh!==navHover){navHover=nh;drawAll()}
+  // ADSR cursor
+  if(scopeMode===2&&ly<ch){
+    const xNorm=lx/SC.w,hitZone=5/SC.w;
+    if(Math.abs(xNorm-adsrBoundAD)<hitZone||Math.abs(xNorm-adsrBoundDS)<hitZone||Math.abs(xNorm-adsrBoundSR)<hitZone)
+      canvas.style.cursor='ew-resize';
+    else if(xNorm>adsrBoundDS+hitZone&&xNorm<adsrBoundSR-hitZone&&Math.abs(ly/ch-adsrSustainY)<hitZone*3)
+      canvas.style.cursor='ns-resize';
+    else canvas.style.cursor=''}}
+else{if(navHover>=0){navHover=-1;drawAll()}canvas.style.cursor=''}
 const ci=hitC(pos.x,pos.y);
 if(ci!==tipCtrl)showTip(ci)});
 
 window.addEventListener('mousemove',e=>{
+// Scope interactive drags
+if(scopeDragMode>0){
+  const dx=e.clientX-scopeDragStartX,dy=e.clientY-scopeDragStartY;
+  const gear=e.shiftKey?500:128;
+  const ch=SC.h-kNavH;
+  if(scopeDragMode===1){
+    // Volume
+    paramValues[P.masterVol]=Math.max(0,Math.min(1,scopeDragStartVal[0]+(dx-dy)/gear));
+    synth.setParam(P.masterVol,paramValues[P.masterVol])}
+  else if(scopeDragMode===2){
+    // VCF: direct position
+    const pos=gmp(e);
+    const lx=pos.x-SC.x,ly=pos.y-SC.y;
+    paramValues[P.vcfFreq]=Math.max(0,Math.min(1,lx/SC.w));
+    paramValues[P.vcfRes]=Math.max(0,Math.min(1,1-ly/ch));
+    synth.setParam(P.vcfFreq,paramValues[P.vcfFreq]);
+    synth.setParam(P.vcfRes,paramValues[P.vcfRes]);
+    if(!liveParams.has(P.vcfFreq))presetDirty=true}
+  else if(scopeDragMode===3){
+    // ADSR
+    let delta;
+    if(adsrDragParam===P.envS)delta=-dy/gear;
+    else if(adsrDragParam===P.envR)delta=-dx/gear;
+    else delta=dx/gear;
+    paramValues[adsrDragParam]=Math.max(0,Math.min(1,scopeDragStartVal[0]+delta));
+    synth.setParam(adsrDragParam,paramValues[adsrDragParam]);
+    if(!liveParams.has(adsrDragParam))presetDirty=true}
+  drawAll();return}
 if(pbDragging){const pos=gmp(e);
   pbDragEndX=Math.max(0,Math.min(SC.w-1,pos.x-SC.x));
   pbDragEndY=Math.max(0,Math.min(SC.h-1,pos.y-SC.y));
@@ -164,11 +229,20 @@ if(key!==kbPressedKey){
 if(dragCtrl===null)return;const[p,t]=controls[dragCtrl];
 if(t==='slider'||t==='knob'){
   const dy=dragStartY-e.clientY;dragStartY=e.clientY;
-  let gear=127;if(e.metaKey||e.ctrlKey)gear*=100;else if(e.shiftKey)gear*=10;
+  let gear=p===P.tuning?205:127;
+  if(e.metaKey||e.ctrlKey)gear*=100;else if(e.shiftKey)gear*=10;
   dragAccum=Math.max(0,Math.min(1,dragAccum+dy/gear));
   let nv=dragAccum;
+  // Tuning: three-zone center snap (100px neg, 6px detent, 100px pos)
+  if(p===P.tuning){
+    const px=nv*205,half=102.5,snapHalf=3;
+    const negEnd=half-snapHalf,posStart=half+snapHalf;
+    if(px<=negEnd)nv=(px/negEnd)*0.495;
+    else if(px>=posStart)nv=0.505+((px-posStart)/(205-posStart))*0.495;
+    else{nv=0.5;if(!tuningInSnap)dragAccum=0.5;tuningInSnap=true}
+    if(px<=negEnd||px>=posStart)tuningInSnap=false}
   if(p===P.hpfFreq)nv=Math.round(nv*3)/3;
-  paramValues[p]=nv;synth.setParam(p,p===P.hpfFreq?nv*3:nv);if(!liveParams.has(p))presetDirty=true}
+  paramValues[p]=nv;synth.setParam(p,p===P.hpfFreq?nv*3:p===P.tuning?nv*2-1:nv);if(!liveParams.has(p))presetDirty=true}
 else if(t==='switch3'||t==='switch2'){const mx=t==='switch3'?2:1;paramValues[p]=Math.max(0,Math.min(mx,Math.round(dragStartVal+(e.clientY-dragStartY)/12)));synth.setParam(p,paramValues[p]);if(!liveParams.has(p))presetDirty=true}
 else if(t==='hswitch3'||t==='hswitch2'){const mx=t==='hswitch3'?2:1;
   const oldVal=paramValues[p];
@@ -183,6 +257,7 @@ else if(t==='bender'){const dx=e.clientX-dragStartY;paramValues[p]=Math.max(0,Ma
 showTip(dragCtrl);drawAll()});
 
 window.addEventListener('mouseup',()=>{
+if(scopeDragMode>0){scopeDragMode=0;canvas.style.cursor='';drawAll()}
 if(pbDragging){
   pbDragging=false;
   const dx=pbDragEndX-pbDragOriginX,dy=pbDragEndY-pbDragOriginY;
@@ -210,7 +285,40 @@ function qn(k){switch(k){case'z':return QBASE;case'x':return QBASE+2;case'c':ret
 const qd={};
 document.addEventListener('keydown',e=>{
 if(!audioStarted)return;
-if(sheetOpen){if(e.key==='Escape'){sheetOpen=false;drawAll()}return}
+if(sheetOpen){
+  if(e.key==='Escape'){
+    if(sheetSearch){sheetSearch='';drawPresetSheet()}
+    else{sheetOpen=false;sheetSearch='';drawAll()}
+    e.preventDefault();return}
+  if(e.key==='Backspace'){
+    if(sheetSearch){sheetSearch=sheetSearch.slice(0,-1);drawPresetSheet()}
+    e.preventDefault();return}
+  if(e.key==='Enter'){
+    if(sheetHover>=0){currentPreset=sheetHover;synth.loadPreset(sheetHover);syncFP(sheetHover)}
+    sheetOpen=false;sheetSearch='';drawAll();e.preventDefault();return}
+  if(e.key==='ArrowRight'){
+    const n=sheetSearch?sheetFindNext(sheetHover+1,1):((sheetHover<0?currentPreset:sheetHover)+1)%128;
+    if(n>=0)sheetHover=n;drawPresetSheet();e.preventDefault();return}
+  if(e.key==='ArrowLeft'){
+    const n=sheetSearch?sheetFindNext(sheetHover-1,-1):((sheetHover<0?currentPreset:sheetHover)+127)%128;
+    if(n>=0)sheetHover=n;drawPresetSheet();e.preventDefault();return}
+  if(e.key==='ArrowDown'){
+    let start=sheetHover<0?currentPreset:sheetHover;
+    const col=start%sheetCols;
+    for(let i=1;i<=sheetRows;i++){const idx=((start+sheetCols*i)%128+128)%128;
+      if((idx%sheetCols)===col&&(!sheetSearch||sheetMatches(idx))){sheetHover=idx;break}}
+    drawPresetSheet();e.preventDefault();return}
+  if(e.key==='ArrowUp'){
+    let start=sheetHover<0?currentPreset:sheetHover;
+    const col=start%sheetCols;
+    for(let i=1;i<=sheetRows;i++){const idx=((start-sheetCols*i)%128+128)%128;
+      if((idx%sheetCols)===col&&(!sheetSearch||sheetMatches(idx))){sheetHover=idx;break}}
+    drawPresetSheet();e.preventDefault();return}
+  if(e.key.length===1&&e.key>=' '&&e.key.charCodeAt(0)<127){
+    sheetSearch+=e.key;
+    if(sheetSearch)sheetHover=sheetFindNext(0,1);
+    drawPresetSheet();e.preventDefault();return}
+  return}
 if(menuOpen){if(e.key==='Escape'){menuOpen=false;drawAll()}return}
 if(e.key==='ArrowUp'||e.key==='ArrowDown'){
   const dir=e.key==='ArrowUp'?-1:1;const n=synth.getNumPresets();if(n>0){currentPreset=((currentPreset+dir)%n+n)%n;synth.loadPreset(currentPreset);syncFP(currentPreset);drawAll()}e.preventDefault();return}
@@ -221,7 +329,7 @@ if(e.key==='PageUp'||e.key==='PageDown'){
 if(e.key==='Enter'){togglePP(e);e.preventDefault();return}
 if(e.key==='`'){QBASE=Math.max(24,QBASE-12);e.preventDefault();return}
 if(e.key==='1'){QBASE=Math.min(84,QBASE+12);e.preventDefault();return}
-if(e.repeat||!canvas)return;const n=qn(e.key.toLowerCase());if(n<0)return;const ki=n-KB.minNote;if(ki<0||ki>=61||qd[n])return;
+if(e.repeat||!canvas||paramValues[P.power]<=0.5)return;const n=qn(e.key.toLowerCase());if(n<0)return;const ki=n-KB.minNote;if(ki<0||ki>=61||qd[n])return;
 if(paramValues[P.transpose]>0.5){
   const offset=n-60;transposeKey=(offset===0)?-1:ki;
   synth.setParam(P.transposeOfs,offset);drawAll();return}
@@ -249,7 +357,7 @@ window.addEventListener('focus',resumeAudio);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseAll();else resumeAudio()});
 
 // ===== Preset Sheet =====
-let sheetOpen=false, sheetHover=-1;
+let sheetOpen=false, sheetHover=-1, sheetSearch='';
 const sheetCols=8, sheetRows=16;
 
 function sheetHitTest(mx,my){
@@ -258,6 +366,14 @@ function sheetHitTest(mx,my){
   if(col<0||col>=sheetCols||row<0||row>=sheetRows)return -1;
   const idx=row*sheetCols+col;
   return idx<128?idx:-1;
+}
+function sheetMatches(idx){
+  if(!sheetSearch)return true;
+  return synth.getPresetName(idx).toLowerCase().includes(sheetSearch.toLowerCase());
+}
+function sheetFindNext(from,step){
+  for(let i=0;i<128;i++){const idx=((from+step*i)%128+128)%128;if(sheetMatches(idx))return idx}
+  return -1;
 }
 
 function drawPresetSheet(){
@@ -275,15 +391,16 @@ function drawPresetSheet(){
     const x=Math.round(col*colW), y=Math.round(row*rowH);
     const cw=Math.round((col+1)*colW)-x, ch=Math.round((row+1)*rowH)-y;
     const name=synth.getPresetName(i).substring(0,16);
+    const matches=sheetMatches(i);
 
     if(i===currentPreset){
       ctx.fillStyle='#00ff00';ctx.fillRect(x,y,cw,ch);
       ctx.fillStyle='#000';
-    }else if(i===sheetHover){
+    }else if(matches&&i===sheetHover){
       ctx.fillStyle='#003c00';ctx.fillRect(x,y,cw,ch);
       ctx.fillStyle='#00ff00';
     }else{
-      ctx.fillStyle='#00ff00';
+      ctx.fillStyle=matches?'#00ff00':'#005a00';
     }
     ctx.fillText(name,x+4,y+ch-2);
   }
@@ -301,7 +418,7 @@ function drawPresetSheet(){
 function togglePP(e){
   menuOpen=false;
   sheetOpen=!sheetOpen;
-  if(sheetOpen){sheetHover=-1;drawPresetSheet()}else drawAll()}
+  if(sheetOpen){sheetHover=-1;sheetSearch='';drawPresetSheet()}else{sheetSearch='';drawAll()}}
 
 // ===== Preset sync =====
 // All live performance params excluded from presets (matches native PluginProcessor.cpp)
@@ -330,7 +447,8 @@ function applySettings(){
   synth.setVoices(menuSettings.voices);
   synth.setIgnoreVelocity(menuSettings.ignoreVel);
   if(menuSettings.midiEnabled&&!synth._midiInit){
-    synth.initMidi().then(()=>{synth._midiInit=true}).catch(()=>{menuSettings.midiEnabled=false})}
+    synth.initMidi().then(()=>{synth._midiInit=true;if(menuOpen)drawSettingsMenu()})
+      .catch((e)=>{menuSettings.midiEnabled=false;console.warn('MIDI init failed:',e);if(menuOpen)drawSettingsMenu()})}
   saveSettings();
   if(menuOpen)drawSettingsMenu()}
 
@@ -365,8 +483,19 @@ try{
       if(on)kbKeys[ki]=1;
       else if(paramValues[P.hold]<=0.5)kbKeys[ki]=0;
       drawAll()}};
+  // AudioWorklet: VCF/HPF slider readback arrives async after preset load or model switch
+  synth.onPresetValues=(data)=>{
+    if(data.vcfSlider!==undefined)paramValues[P.vcfFreq]=data.vcfSlider;
+    if(data.hpfSlider!==undefined)paramValues[P.hpfFreq]=data.hpfSlider/3;
+    drawAll();
+  };
+  synth.onSliderUpdate=(data)=>{
+    if(data.vcfSlider!==undefined)paramValues[P.vcfFreq]=data.vcfSlider;
+    if(data.hpfSlider!==undefined)paramValues[P.hpfFreq]=data.hpfSlider/3;
+    drawAll();
+  };
   // MIDI disabled by default — will be enabled from settings menu
   // try{await synth.initMidi()}catch(e){}
   let lastFrame=0;function scopeLoop(t){requestAnimationFrame(scopeLoop);if(t-lastFrame<66)return;lastFrame=t;
-if(!sheetOpen&&paramValues[P.power]>0.5){ctx.save();ctx.scale(S,S);drawScope();drawClipLED(53,127);ctx.restore()}}scopeLoop(0);
+if(!sheetOpen&&paramValues[P.power]>0.5){if(scopeClipHold>0)scopeClipHold--;ctx.save();ctx.scale(S,S);drawScope();drawClipLED(53,127);ctx.restore()}}scopeLoop(0);
 }catch(e){console.error(e)}}

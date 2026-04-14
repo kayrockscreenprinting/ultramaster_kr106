@@ -1,1 +1,501 @@
-let canvas,ctx;function drawAll(){ctx.save(),ctx.scale(S,S),images.bg&&ctx.drawImage(images.bg,0,0,W,H);const e=paramValues[P.power]>.5;for(const t of controls){const[r,a,s,n,l]=t;if("slider"===a){const e=r===P.hpfFreq?4:0;drawSlider(s,n,paramValues[r],l||0,e)}else"switch3"===a?drawSwitch(s,n,Math.round(paramValues[r]),3):"switch2"===a?drawSwitch(s,n,Math.round(paramValues[r]),2):"hswitch3"===a?drawHSwitch(s,n,Math.round(paramValues[r]),3):"hswitch2"===a?drawHSwitch(s,n,Math.round(paramValues[r]),2):"knob"===a?drawKnob(s,n,paramValues[r]):"chorusoff"===a?drawBtn(s,n,17,19,0,!1):"power"===a?drawPower(s,n,paramValues[r]>.5):"clipled"===a?drawClipLED(s,n):"bender"===a?drawBender(s,n,paramValues[r]):"btnled"===a?drawBtnLED(s,n,e&&paramValues[r]>.5,l||0):"gear"===a&&drawGear(s,n,!1)}drawKeyboard(),e&&(drawScope(),drawPresetDisplay()),ctx.restore(),menuOpen&&drawSettingsMenu()}let dragCtrl=null,dragStartY=0,dragStartVal=0,dragAccum=0,pressedBtn=-1,kbPressedKey=-1,kbDragging=!1,tuningInSnap=!1,transposeKey=-1,benderDragStartY=0;const kbTO=[13,27,40,54,66,79,93,103,117,128,142,154],kbBO=[22,22,44,44,66,88,88,110,110,132,132,154];function m2k(e,t){const r=e-KB.x,a=t-KB.y-5;if(r<0||r>=792||a<0||a>=109)return-1;const s=Math.floor(r/154),n=r%154,l=a<=56?kbTO:kbBO;for(let e=0;e<12;e++)if(n<l[e]){const t=12*s+e;return t<61?t:-1}return 4===s&&n>=132?60:-1}function hitC(e,t){for(let r=controls.length-1;r>=0;r--){const a=ctrlBounds(controls[r]);if(e>=a.x&&e<a.x+a.w&&t>=a.y&&t<a.y+a.h)return r}return-1}function gmp(e){const t=canvas.getBoundingClientRect();return{x:(e.clientX-t.left)*W/t.width,y:(e.clientY-t.top)*H/t.height}}function initCanvas(){canvas=document.getElementById("c"),canvas.width=W*S,canvas.height=H*S,canvas.style.width="100%",canvas.style.height="auto",S>=2&&(canvas.style.imageRendering="pixelated"),ctx=canvas.getContext("2d"),canvas.addEventListener("mousedown",e=>{const t=gmp(e);if(sheetOpen){if(t.x>=W-14&&t.y<14)return sheetOpen=!1,sheetSearch="",drawAll(),void e.preventDefault();const r=sheetHitTest(t.x,t.y);return r>=0&&(currentPreset=r,synth.loadPreset(r),syncFP(r)),sheetOpen=!1,sheetSearch="",drawAll(),void e.preventDefault()}if(menuOpen){const r=180,a=14*menuItems.length,s=Math.round((W-r)/2),n=Math.round((H-a)/2);if(t.x>=s&&t.x<s+r&&t.y>=n&&t.y<n+a){const e=Math.floor((t.y-n)/14);if(e>=0&&e<menuItems.length){const t=menuItems[e];"radio"===t.type?(menuSettings[t.group]=t.val,applySettings()):"check"===t.type&&(menuSettings[t.key]=!menuSettings[t.key],applySettings())}}else menuOpen=!1;return drawAll(),void e.preventDefault()}if(t.x>=790&&t.x<918&&t.y>=86&&t.y<100)return void togglePP(e);if(t.x>=SC.x&&t.x<SC.x+SC.w&&t.y>=SC.y&&t.y<SC.y+SC.h){const r=t.x-SC.x,a=t.y-SC.y,s=SC.h-kNavH;if(a>=s)return r<kNavArrowW?cycleScopeMode(-1):r>=SC.w-kNavArrowW&&cycleScopeMode(1),drawAll(),void e.preventDefault();if(4===scopeMode){if(pbBallActive)return pbBallActive=!1,drawAll(),void e.preventDefault();const t=pbPatchAt(r,a);return t>=0&&(currentPreset=t,synth.loadPreset(t),syncFP(t),pbDragOriginX=Math.floor(r/kPBCell)*kPBCell+kPBCell/2,pbDragOriginY=Math.floor(a/kPBCell)*kPBCell+kPBCell/2,pbDragEndX=r,pbDragEndY=a,pbDragging=!0),drawAll(),void e.preventDefault()}if(scopeDragStartX=e.clientX,scopeDragStartY=e.clientY,0===scopeMode||1===scopeMode)scopeDragMode=1,scopeDragStartVal[0]=paramValues[P.masterVol];else if(3===scopeMode)scopeDragMode=2,paramValues[P.vcfFreq]=Math.max(0,Math.min(1,r/SC.w)),paramValues[P.vcfRes]=Math.max(0,Math.min(1,1-a/s)),synth.setParam(P.vcfFreq,paramValues[P.vcfFreq]),synth.setParam(P.vcfRes,paramValues[P.vcfRes]),liveParams.has(P.vcfFreq)||(presetDirty=!0);else if(2===scopeMode){const e=r/SC.w,t=5/SC.w;Math.abs(e-adsrBoundAD)<t?(scopeDragMode=3,adsrDragParam=P.envA):Math.abs(e-adsrBoundDS)<t?(scopeDragMode=3,adsrDragParam=P.envD):Math.abs(e-adsrBoundSR)<t?(scopeDragMode=3,adsrDragParam=P.envR):e>adsrBoundDS+t&&e<adsrBoundSR-t&&Math.abs(a/s-adsrSustainY)<3*t&&(scopeDragMode=3,adsrDragParam=P.envS),3===scopeDragMode&&(scopeDragStartVal[0]=paramValues[adsrDragParam])}return drawAll(),void e.preventDefault()}const r=m2k(t.x,t.y);if(r>=0&&paramValues[P.power]>.5){if(paramValues[P.transpose]>.5){const e=r+KB.minNote-60;return transposeKey=0===e?-1:r,synth.setParam(P.transposeOfs,e),void drawAll()}return paramValues[P.hold]>.5&&kbKeys[r]?(kbKeys[r]=0,synth.forceRelease(r+KB.minNote),void drawAll()):(kbKeys[r]=1,kbPressedKey=r,kbDragging=!0,synth.noteOn(r+KB.minNote,127),void drawAll())}const a=hitC(t.x,t.y);if(a<0)return;const[s,n]=controls[a];"slider"===n||"knob"===n?(dragCtrl=a,dragStartY=e.clientY,dragStartVal=paramValues[s],dragAccum=paramValues[s],document.body.style.cursor="none"):"switch3"===n||"switch2"===n?(dragCtrl=a,dragStartY=e.clientY,dragStartVal=Math.round(paramValues[s])):"hswitch3"===n||"hswitch2"===n?(dragCtrl=a,dragStartY=e.clientX,dragStartVal=Math.round(paramValues[s])):"btnled"===n?(pressedBtn=a,paramValues[s]=paramValues[s]>.5?0:1,synth.setParam(s,paramValues[s]),liveParams.has(s)||(presetDirty=!0),s===P.hold&&paramValues[s]<=.5&&kbKeys.fill(0),drawAll()):"power"===n?(paramValues[s]=paramValues[s]>.5?0:1,synth.setParam(s,paramValues[s]),paramValues[s]<=.5&&(kbKeys.fill(0),synth.controlChange(123,0)),drawAll()):"bender"===n?(dragCtrl=a,dragStartY=e.clientX,dragStartVal=paramValues[s],benderDragStartY=e.clientY,benderTriggered=!1):"chorusoff"===n?(pressedBtn=a,paramValues[P.chorusI]=0,paramValues[P.chorusII]=0,synth.setParam(P.chorusI,0),synth.setParam(P.chorusII,0),liveParams.has(s)||(presetDirty=!0),drawAll()):"gear"===n&&(menuOpen=!menuOpen,menuHover=-1,drawAll()),e.preventDefault()}),canvas.addEventListener("contextmenu",e=>{const t=gmp(e);t.x>=SC.x&&t.x<SC.x+SC.w&&t.y>=SC.y&&t.y<SC.y+SC.h&&e.preventDefault()});const e=()=>document.getElementById("tooltip");let t=-1;function r(r){const a=e();if(r<0)return a.style.display="none",void(t=-1);const[s,n]=controls[r],l="chorusoff"===n?"Chorus Off":paramNames[s]||"";if(!l)return a.style.display="none",void(t=-1);let o="";if("slider"===n||"knob"===n)o=paramValueText(s,paramValues[s]);else if("switch3"===n||"switch2"===n||"hswitch3"===n||"hswitch2"===n){const e=switchLabels[s];e&&(o=e[Math.round(paramValues[s])])}else"btnled"===n&&(o=paramValues[s]>.5?"On":"Off");a.textContent=o?l+": "+o:l,a.style.display="block";const c=ctrlBounds(controls[r]),d=canvas.getBoundingClientRect(),i=d.width/W,u=d.height/H;a.style.left=Math.max(0,(c.x+c.w/2)*i-a.offsetWidth/2)+"px",a.style.top=(c.y+c.h)*u+2+"px",t=r}canvas.addEventListener("mouseleave",()=>{e().style.display="none",t=-1}),canvas.addEventListener("mousemove",a=>{if(sheetOpen){const r=gmp(a),s=r.x>=W-14&&r.y<14?-2:sheetHitTest(r.x,r.y);return s!==sheetHover&&(sheetHover=s,drawPresetSheet()),e().style.display="none",void(t=-1)}if(menuOpen){const r=gmp(a),s=180,n=14*menuItems.length,l=Math.round((W-s)/2),o=Math.round((H-n)/2);let c=-1;return r.x>=l&&r.x<l+s&&r.y>=o&&r.y<o+n&&(c=Math.floor((r.y-o)/14)),c>=0&&c<menuItems.length&&("sep"===menuItems[c].type||"label"===menuItems[c].type)&&(c=-1),c!==menuHover&&(menuHover=c,drawSettingsMenu()),e().style.display="none",void(t=-1)}if(null!==dragCtrl)return void r(dragCtrl);const s=gmp(a);if(s.x>=SC.x&&s.x<SC.x+SC.w&&s.y>=SC.y&&s.y<SC.y+SC.h){const e=s.y-SC.y,t=s.x-SC.x,r=SC.h-kNavH;let a=-1;if(e>=r&&(a=t<kNavArrowW?0:t>=SC.w-kNavArrowW?1:-1),a!==navHover&&(navHover=a,drawAll()),2===scopeMode&&e<r){const a=t/SC.w,s=5/SC.w;Math.abs(a-adsrBoundAD)<s||Math.abs(a-adsrBoundDS)<s||Math.abs(a-adsrBoundSR)<s?canvas.style.cursor="ew-resize":a>adsrBoundDS+s&&a<adsrBoundSR-s&&Math.abs(e/r-adsrSustainY)<3*s?canvas.style.cursor="ns-resize":canvas.style.cursor=""}}else navHover>=0&&(navHover=-1,drawAll()),canvas.style.cursor="";const n=hitC(s.x,s.y);n!==t&&r(n)}),window.addEventListener("mousemove",e=>{if(scopeDragMode>0){const t=e.clientX-scopeDragStartX,r=e.clientY-scopeDragStartY,a=e.shiftKey?500:128,s=SC.h-kNavH;if(1===scopeDragMode)paramValues[P.masterVol]=Math.max(0,Math.min(1,scopeDragStartVal[0]+(t-r)/a)),synth.setParam(P.masterVol,paramValues[P.masterVol]);else if(2===scopeDragMode){const t=gmp(e),r=t.x-SC.x,a=t.y-SC.y;paramValues[P.vcfFreq]=Math.max(0,Math.min(1,r/SC.w)),paramValues[P.vcfRes]=Math.max(0,Math.min(1,1-a/s)),synth.setParam(P.vcfFreq,paramValues[P.vcfFreq]),synth.setParam(P.vcfRes,paramValues[P.vcfRes]),liveParams.has(P.vcfFreq)||(presetDirty=!0)}else if(3===scopeDragMode){let e;e=adsrDragParam===P.envS?-r/a:adsrDragParam===P.envR?-t/a:t/a,paramValues[adsrDragParam]=Math.max(0,Math.min(1,scopeDragStartVal[0]+e)),synth.setParam(adsrDragParam,paramValues[adsrDragParam]),liveParams.has(adsrDragParam)||(presetDirty=!0)}return void drawAll()}if(pbDragging){const t=gmp(e);return pbDragEndX=Math.max(0,Math.min(SC.w-1,t.x-SC.x)),pbDragEndY=Math.max(0,Math.min(SC.h-1,t.y-SC.y)),void drawAll()}if(kbDragging){const t=gmp(e),r=m2k(t.x,t.y);return void(r!==kbPressedKey&&(kbPressedKey>=0&&(paramValues[P.hold]<=.5&&(kbKeys[kbPressedKey]=0),synth.noteOff(kbPressedKey+KB.minNote)),r>=0?(kbKeys[r]=1,kbPressedKey=r,synth.noteOn(r+KB.minNote,127)):kbPressedKey=-1,drawAll()))}if(null===dragCtrl)return;const[t,a]=controls[dragCtrl];if("slider"===a||"knob"===a){const r=dragStartY-e.clientY;dragStartY=e.clientY;let a=t===P.tuning?205:127;e.metaKey||e.ctrlKey?a*=100:e.shiftKey&&(a*=10),dragAccum=Math.max(0,Math.min(1,dragAccum+r/a));let s=dragAccum;if(t===P.tuning){const e=205*s,t=102.5,r=3,a=t-r,n=t+r;e<=a?s=e/a*.495:e>=n?s=.505+(e-n)/(205-n)*.495:(s=.5,tuningInSnap||(dragAccum=.5),tuningInSnap=!0),(e<=a||e>=n)&&(tuningInSnap=!1)}t===P.hpfFreq&&(s=Math.round(3*s)/3),paramValues[t]=s,synth.setParam(t,t===P.hpfFreq?3*s:t===P.tuning?2*s-1:s),liveParams.has(t)||(presetDirty=!0)}else if("switch3"===a||"switch2"===a){const r="switch3"===a?2:1;paramValues[t]=Math.max(0,Math.min(r,Math.round(dragStartVal+(e.clientY-dragStartY)/12))),synth.setParam(t,paramValues[t]),liveParams.has(t)||(presetDirty=!0)}else if("hswitch3"===a||"hswitch2"===a){const r="hswitch3"===a?2:1,s=paramValues[t];paramValues[t]=Math.max(0,Math.min(r,Math.round(dragStartVal+(e.clientX-dragStartY)/12))),synth.setParam(t,paramValues[t]),liveParams.has(t)||(presetDirty=!0),t===P.adsrMode&&Math.round(s)!==Math.round(paramValues[t])&&(paramValues[P.vcfFreq]=synth.getVcfSlider(),paramValues[P.hpfFreq]=synth.getHpfSlider()/3,synth.setBankOffset(paramValues[t]<.5?0:1))}else if("bender"===a){const r=e.clientX-dragStartY;paramValues[t]=Math.max(0,Math.min(1,dragStartVal+r/100)),synth.setParam(t,2*paramValues[t]-1);const a=e.clientY<benderDragStartY-8;a!==benderTriggered&&(benderTriggered=a,synth.controlChange(1,a?1:0))}r(dragCtrl),drawAll()}),window.addEventListener("mouseup",()=>{if(scopeDragMode>0&&(scopeDragMode=0,canvas.style.cursor="",drawAll()),pbDragging){pbDragging=!1;const e=pbDragEndX-pbDragOriginX,t=pbDragEndY-pbDragOriginY,r=Math.sqrt(e*e+t*t),a=pbPatchAt(pbDragEndX,pbDragEndY),s=pbPatchAt(pbDragOriginX,pbDragOriginY);if(a!==s&&r>1){const a=Math.min(r/80,1);pbBallSpeed=a*a*.45,pbBallAccum=0,pbBallErrX=0,pbBallErrY=0,pbBallCellX=s%kPBCols,pbBallCellY=Math.floor(s/kPBCols),pbBallDX=-e/r,pbBallDY=-t/r,pbBallActive=!0}drawAll()}if(null!==dragCtrl){const e=controls[dragCtrl][1];if("bender"===e&&(paramValues[P.bender]=.5,synth.setParam(P.bender,0),benderTriggered&&(benderTriggered=!1,synth.controlChange(1,0)),drawAll()),"slider"===e||"knob"===e){document.body.style.cursor="";const e=controls[dragCtrl][0];if(e===P.hpfFreq){const t=Math.round(3*paramValues[e])/3;t!==paramValues[e]&&(paramValues[e]=t,synth.setParam(e,3*t))}}}dragCtrl=null,e().style.display="none",t=-1,pressedBtn>=0&&(pressedBtn=-1,drawAll()),kbDragging&&(kbPressedKey>=0&&(paramValues[P.hold]<=.5&&(kbKeys[kbPressedKey]=0),synth.noteOff(kbPressedKey+KB.minNote)),kbPressedKey=-1,kbDragging=!1,drawAll())})}let QBASE=48;function qn(e){switch(e){case"z":return QBASE;case"x":return QBASE+2;case"c":return QBASE+4;case"v":return QBASE+5;case"b":return QBASE+7;case"n":return QBASE+9;case"m":return QBASE+11;case",":case"q":return QBASE+12;case".":case"w":return QBASE+14;case"/":case"e":return QBASE+16;case"s":return QBASE+1;case"d":return QBASE+3;case"g":return QBASE+6;case"h":return QBASE+8;case"j":return QBASE+10;case"l":case"2":return QBASE+13;case";":case"3":return QBASE+15;case"'":case"r":return QBASE+17;case"t":return QBASE+19;case"y":return QBASE+21;case"u":return QBASE+23;case"i":return QBASE+24;case"o":return QBASE+26;case"p":return QBASE+28;case"[":return QBASE+29;case"]":return QBASE+31;case"5":return QBASE+18;case"6":return QBASE+20;case"7":return QBASE+22;case"9":return QBASE+25;case"0":return QBASE+27;case"-":return QBASE+30;case"=":return QBASE+32;default:return-1}}const qd={};function releaseAll(){pbBallActive=!1,pbDragging=!1,null!==dragCtrl&&"bender"===controls[dragCtrl][1]&&(paramValues[P.bender]=.5,synth.setParam(P.bender,0)),null===dragCtrl||"slider"!==controls[dragCtrl][1]&&"knob"!==controls[dragCtrl][1]||(document.body.style.cursor=""),dragCtrl=null,kbDragging=!1;for(const e in qd){const t=parseInt(e);synth.noteOff(t);const r=t-KB.minNote;r>=0&&r<61&&(kbKeys[r]=0)}for(const e in qd)delete qd[e];kbPressedKey>=0&&(paramValues[P.hold]<=.5&&(kbKeys[kbPressedKey]=0),synth.noteOff(kbPressedKey+KB.minNote),kbPressedKey=-1),synth.ctx&&"running"===synth.ctx.state&&synth.ctx.suspend(),drawAll()}function resumeAudio(){synth.ctx&&"suspended"===synth.ctx.state&&synth.ctx.resume()}document.addEventListener("keydown",e=>{if(!audioStarted)return;if(sheetOpen){if("Escape"===e.key)return sheetSearch?(sheetSearch="",drawPresetSheet()):(sheetOpen=!1,sheetSearch="",drawAll()),void e.preventDefault();if("Backspace"===e.key)return sheetSearch&&(sheetSearch=sheetSearch.slice(0,-1),drawPresetSheet()),void e.preventDefault();if("Enter"===e.key)return sheetHover>=0&&(currentPreset=sheetHover,synth.loadPreset(sheetHover),syncFP(sheetHover)),sheetOpen=!1,sheetSearch="",drawAll(),void e.preventDefault();if("ArrowRight"===e.key){const t=sheetSearch?sheetFindNext(sheetHover+1,1):((sheetHover<0?currentPreset:sheetHover)+1)%128;return t>=0&&(sheetHover=t),drawPresetSheet(),void e.preventDefault()}if("ArrowLeft"===e.key){const t=sheetSearch?sheetFindNext(sheetHover-1,-1):((sheetHover<0?currentPreset:sheetHover)+127)%128;return t>=0&&(sheetHover=t),drawPresetSheet(),void e.preventDefault()}if("ArrowDown"===e.key){let t=sheetHover<0?currentPreset:sheetHover;const r=t%sheetCols;for(let e=1;e<=sheetRows;e++){const a=((t+sheetCols*e)%128+128)%128;if(a%sheetCols===r&&(!sheetSearch||sheetMatches(a))){sheetHover=a;break}}return drawPresetSheet(),void e.preventDefault()}if("ArrowUp"===e.key){let t=sheetHover<0?currentPreset:sheetHover;const r=t%sheetCols;for(let e=1;e<=sheetRows;e++){const a=((t-sheetCols*e)%128+128)%128;if(a%sheetCols===r&&(!sheetSearch||sheetMatches(a))){sheetHover=a;break}}return drawPresetSheet(),void e.preventDefault()}return 1===e.key.length&&e.key>=" "&&e.key.charCodeAt(0)<127?(sheetSearch+=e.key,sheetSearch&&(sheetHover=sheetFindNext(0,1)),drawPresetSheet(),void e.preventDefault()):void 0}if(menuOpen)return void("Escape"===e.key&&(menuOpen=!1,drawAll()));if("ArrowUp"===e.key||"ArrowDown"===e.key){const t="ArrowUp"===e.key?-1:1,r=synth.getNumPresets();return r>0&&(currentPreset=((currentPreset+t)%r+r)%r,synth.loadPreset(currentPreset),syncFP(currentPreset),drawAll()),void e.preventDefault()}if("ArrowLeft"===e.key||"ArrowRight"===e.key)return cycleScopeMode("ArrowRight"===e.key?1:-1),drawAll(),void e.preventDefault();if("PageUp"===e.key||"PageDown"===e.key){const t="PageUp"===e.key?-8:8,r=synth.getNumPresets();return r>0&&(currentPreset=((currentPreset+t)%r+r)%r,synth.loadPreset(currentPreset),syncFP(currentPreset),drawAll()),void e.preventDefault()}if("Enter"===e.key)return togglePP(e),void e.preventDefault();if("`"===e.key)return QBASE=Math.max(24,QBASE-12),void e.preventDefault();if("1"===e.key)return QBASE=Math.min(84,QBASE+12),void e.preventDefault();if(e.repeat||!canvas||paramValues[P.power]<=.5)return;const t=qn(e.key.toLowerCase());if(t<0)return;const r=t-KB.minNote;if(!(r<0||r>=61||qd[t])){if(paramValues[P.transpose]>.5){const e=t-60;return transposeKey=0===e?-1:r,synth.setParam(P.transposeOfs,e),void drawAll()}qd[t]=1,kbKeys[r]=1,synth.noteOn(t,127),drawAll()}}),document.addEventListener("keyup",e=>{if(!canvas)return;const t=qn(e.key.toLowerCase());if(t<0||!qd[t])return;delete qd[t];const r=t-KB.minNote;r>=0&&r<61&&(kbKeys[r]=0),synth.noteOff(t),drawAll()}),window.addEventListener("blur",releaseAll),window.addEventListener("focus",resumeAudio),document.addEventListener("visibilitychange",()=>{document.hidden?releaseAll():resumeAudio()});let sheetOpen=!1,sheetHover=-1,sheetSearch="";const sheetCols=8,sheetRows=16;function sheetHitTest(e,t){const r=W/sheetCols,a=H/sheetRows,s=Math.floor(e/r),n=Math.floor(t/a);if(s<0||s>=sheetCols||n<0||n>=sheetRows)return-1;const l=n*sheetCols+s;return l<128?l:-1}function sheetMatches(e){return!sheetSearch||synth.getPresetName(e).toLowerCase().includes(sheetSearch.toLowerCase())}function sheetFindNext(e,t){for(let r=0;r<128;r++){const a=((e+t*r)%128+128)%128;if(sheetMatches(a))return a}return-1}function drawPresetSheet(){ctx.save(),ctx.scale(S,S),ctx.fillStyle="#000",ctx.fillRect(0,0,W,H);const e=W/sheetCols,t=H/sheetRows;ctx.font="11px 'Segment14', monospace",ctx.fillStyle="#002800";for(let e=0;e<=sheetRows;e++){const r=Math.round(e*t);ctx.fillRect(0,r,W,1)}for(let t=1;t<sheetCols;t++){const r=Math.round(t*e);ctx.fillRect(r,0,1,H)}for(let r=0;r<128;r++){const a=r%sheetCols,s=Math.floor(r/sheetCols),n=Math.round(a*e),l=Math.round(s*t),o=Math.round((a+1)*e)-n,c=Math.round((s+1)*t)-l,d=synth.getPresetName(r).substring(0,16),i=sheetMatches(r);r===currentPreset?(ctx.fillStyle="#00ff00",ctx.fillRect(n,l,o,c),ctx.fillStyle="#000"):i&&r===sheetHover?(ctx.fillStyle="#003c00",ctx.fillRect(n,l,o,c),ctx.fillStyle="#00ff00"):ctx.fillStyle=i?"#00ff00":"#005a00",ctx.fillText(d,n+4,l+c-2)}const r=W-14;ctx.fillStyle=-2===sheetHover?"#003c00":"#000",ctx.fillRect(r,0,14,14),ctx.strokeStyle="#006400",ctx.lineWidth=1,ctx.strokeRect(r+.5,.5,13,13),ctx.fillStyle="#00ff00",ctx.font="13px 'Segment14', monospace",ctx.fillText("x",r+3,12),ctx.strokeStyle="#006400",ctx.lineWidth=1,ctx.strokeRect(0,0,W,H),ctx.restore()}function togglePP(e){menuOpen=!1,sheetOpen=!sheetOpen,sheetOpen?(sheetHover=-1,sheetSearch="",drawPresetSheet()):(sheetSearch="",drawAll())}const liveParams=new Set([P.benderDco,P.benderVcf,P.arpRate,P.transpose,P.hold,P.arpeggio,P.arpMode,P.arpRange,P.bender,P.tuning,P.power,P.portaMode,P.portaRate,P.transposeOfs,P.benderLfo,P.masterVol]);function syncFP(e){for(let t=0;t<=19;t++)liveParams.has(t)||(t!==P.hpfFreq?paramValues[t]=synth.getPresetValue(e,t)/127:paramValues[t]=synth.getPresetValue(e,t)/3);liveParams.has(P.portaRate)||(paramValues[P.portaRate]=synth.getPresetValue(e,40)/127);for(let t=20;t<=39;t++)liveParams.has(t)||(paramValues[t]=synth.getPresetValue(e,t));for(let t=41;t<=43;t++)liveParams.has(t)||(paramValues[t]=synth.getPresetValue(e,t));presetDirty=!1}function loadSettings(){try{const e=localStorage.getItem("kr106_settings");e&&Object.assign(menuSettings,JSON.parse(e))}catch(e){}}function saveSettings(){try{localStorage.setItem("kr106_settings",JSON.stringify(menuSettings))}catch(e){}}function applySettings(){synth.setVoices(menuSettings.voices),synth.setIgnoreVelocity(menuSettings.ignoreVel),menuSettings.midiEnabled&&!synth._midiInit&&synth.initMidi().then(()=>{synth._midiInit=!0,menuOpen&&drawSettingsMenu()}).catch(e=>{menuSettings.midiEnabled=!1,console.warn("MIDI init failed:",e),menuOpen&&drawSettingsMenu()}),saveSettings(),menuOpen&&drawSettingsMenu()}let audioStarted=!1;async function startAudio(){if(!audioStarted){audioStarted=!0,document.getElementById("splash").style.display="none",document.getElementById("synth-wrap").style.display="block",initCanvas(),paramValues[P.power]=1,paramValues[P.tuning]=.5,paramValues[P.masterVol]=.5,paramValues[P.bender]=.5;try{await loadImages(),await document.fonts.load("11px 'Segment14'"),drawAll(),await synth.init(),currentPreset=Math.floor(Math.random()*synth.getNumPresets()),synth.loadPreset(currentPreset),syncFP(currentPreset),paramValues[P.tuning]=.5,paramValues[P.masterVol]=.5,paramValues[P.bender]=.5,paramValues[P.power]=1,paramValues[P.arpRate]=.35,paramValues[P.portaMode]=1,loadSettings(),applySettings(),drawAll(),synth.onMidiNote=(e,t)=>{if(t&&paramValues[P.transpose]>.5){const t=e-60,r=e-KB.minNote;return transposeKey=0===t?-1:r>=0&&r<61?r:-1,synth.setParam(P.transposeOfs,t),void drawAll()}const r=e-KB.minNote;r>=0&&r<61&&(t?kbKeys[r]=1:paramValues[P.hold]<=.5&&(kbKeys[r]=0),drawAll())},synth.onPresetValues=e=>{void 0!==e.vcfSlider&&(paramValues[P.vcfFreq]=e.vcfSlider),void 0!==e.hpfSlider&&(paramValues[P.hpfFreq]=e.hpfSlider/3),drawAll()},synth.onSliderUpdate=e=>{void 0!==e.vcfSlider&&(paramValues[P.vcfFreq]=e.vcfSlider),void 0!==e.hpfSlider&&(paramValues[P.hpfFreq]=e.hpfSlider/3),drawAll()};let e=0;!function t(r){requestAnimationFrame(t),r-e<66||(e=r,!sheetOpen&&paramValues[P.power]>.5&&(scopeClipHold>0&&scopeClipHold--,ctx.save(),ctx.scale(S,S),drawScope(),drawClipLED(53,127),ctx.restore()))}(0)}catch(e){console.error(e)}}}
+// kr106-ui.js — Canvas init, mouse/keyboard handlers, preset sheet, startup
+// Depends on: kr106-audio.js, kr106-params.js, kr106-controls.js, kr106-scope.js
+
+let canvas, ctx;
+
+// ===== drawAll =====
+function drawAll(){if(!ctx)return;ctx.save();ctx.scale(S,S);if(images.bg)ctx.drawImage(images.bg,0,0,W,H);
+const powerOn=paramValues[P.power]>0.5;
+for(const c of controls){const[p,t,x,y,e]=c;
+if(t==='slider'){const notch=(p===P.hpfFreq)?4:0;drawSlider(x,y,paramValues[p],e||0,notch)}
+else if(t==='switch3')drawSwitch(x,y,Math.round(paramValues[p]),3);
+else if(t==='switch2')drawSwitch(x,y,Math.round(paramValues[p]),2);
+else if(t==='hswitch3')drawHSwitch(x,y,Math.round(paramValues[p]),3);
+else if(t==='hswitch2')drawHSwitch(x,y,Math.round(paramValues[p]),2);
+else if(t==='knob')drawKnob(x,y,paramValues[p]);
+else if(t==='chorusoff')drawBtn(x,y,17,19,0,false);
+else if(t==='power')drawPower(x,y,paramValues[p]>0.5);
+else if(t==='clipled')drawClipLED(x,y);
+else if(t==='bender')drawBender(x,y,paramValues[p]);
+else if(t==='btnled')drawBtnLED(x,y,powerOn&&paramValues[p]>0.5,e||0)
+else if(t==='gear')drawGear(x,y,false)}
+drawKeyboard();if(powerOn){drawScope();drawPresetDisplay()}ctx.restore();
+if(menuOpen)drawSettingsMenu()}
+
+// ===== Mouse =====
+let dragCtrl=null,dragStartY=0,dragStartVal=0,dragAccum=0,pressedBtn=-1,kbPressedKey=-1,kbDragging=false;
+let tuningInSnap=false;
+let transposeKey=-1; // keyboard index of current transpose root (-1 = none)
+let benderDragStartY=0; // vertical drag start for LFO trigger
+const kbTO=[13,27,40,54,66,79,93,103,117,128,142,154],kbBO=[22,22,44,44,66,88,88,110,110,132,132,154];
+function m2k(mx,my){const lx=mx-KB.x,ly=my-KB.y-5;if(lx<0||lx>=792||ly<0||ly>=109)return -1;const oc=Math.floor(lx/154),off=lx%154,os=(ly<=56)?kbTO:kbBO;for(let i=0;i<12;i++)if(off<os[i]){const k=oc*12+i;return k<61?k:-1}if(oc===4&&off>=132)return 60;return -1}
+function hitC(mx,my){for(let i=controls.length-1;i>=0;i--){const b=ctrlBounds(controls[i]);if(mx>=b.x&&mx<b.x+b.w&&my>=b.y&&my<b.y+b.h)return i}return -1}
+function gmp(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}
+
+function initCanvas(){
+canvas=document.getElementById('c');canvas.width=W*S;canvas.height=H*S;
+canvas.style.width='100%';canvas.style.height='auto';
+if(S>=2)canvas.style.imageRendering='pixelated';
+ctx=canvas.getContext('2d');
+canvas.addEventListener('mousedown',e=>{const pos=gmp(e);
+// Preset sheet click
+if(sheetOpen){
+  if(pos.x>=W-14&&pos.y<14){sheetOpen=false;sheetSearch='';drawAll();e.preventDefault();return}
+  const idx=sheetHitTest(pos.x,pos.y);
+  if(idx>=0){currentPreset=idx;synth.loadPreset(idx);syncFP(idx)}
+  sheetOpen=false;sheetSearch='';drawAll();e.preventDefault();return}
+// Settings menu click
+if(menuOpen){
+  const mw=180,mh=menuItems.length*14;
+  const mmx=Math.round((W-mw)/2),mmy=Math.round((H-mh)/2);
+  if(pos.x>=mmx&&pos.x<mmx+mw&&pos.y>=mmy&&pos.y<mmy+mh){
+    const row=Math.floor((pos.y-mmy)/14);
+    if(row>=0&&row<menuItems.length){
+      const it=menuItems[row];
+      if(it.type==='radio'){menuSettings[it.group]=it.val;applySettings()}
+      else if(it.type==='check'){menuSettings[it.key]=!menuSettings[it.key];applySettings()}}}
+  else{menuOpen=false}
+  drawAll();e.preventDefault();return}
+if(pos.x>=790&&pos.x<918&&pos.y>=86&&pos.y<100){togglePP(e);return}
+// Scope click
+if(pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h){
+  const lx=pos.x-SC.x, ly=pos.y-SC.y;
+  const ch=SC.h-kNavH;
+  // Nav bar click (all modes)
+  if(ly>=ch){
+    if(lx<kNavArrowW)cycleScopeMode(-1);
+    else if(lx>=SC.w-kNavArrowW)cycleScopeMode(1);
+    drawAll();e.preventDefault();return}
+  // Patch bank mode
+  if(scopeMode===4){
+    if(pbBallActive){pbBallActive=false;drawAll();e.preventDefault();return}
+    const idx=pbPatchAt(lx,ly);
+    if(idx>=0){
+      currentPreset=idx;synth.loadPreset(idx);syncFP(idx);
+      pbDragOriginX=Math.floor(lx/kPBCell)*kPBCell+kPBCell/2;
+      pbDragOriginY=Math.floor(ly/kPBCell)*kPBCell+kPBCell/2;
+      pbDragEndX=lx;pbDragEndY=ly;pbDragging=true}
+    drawAll();e.preventDefault();return}
+  // Interactive drags
+  scopeDragStartX=e.clientX;scopeDragStartY=e.clientY;
+  if(scopeMode===0||scopeMode===1){
+    // Waveform/spectrum: drag = master volume
+    scopeDragMode=1;scopeDragStartVal[0]=paramValues[P.masterVol]}
+  else if(scopeMode===3){
+    // VCF: direct position
+    scopeDragMode=2;
+    paramValues[P.vcfFreq]=Math.max(0,Math.min(1,lx/SC.w));
+    paramValues[P.vcfRes]=Math.max(0,Math.min(1,1-ly/ch));
+    synth.setParam(P.vcfFreq,paramValues[P.vcfFreq]);
+    synth.setParam(P.vcfRes,paramValues[P.vcfRes]);
+    if(!liveParams.has(P.vcfFreq))presetDirty=true}
+  else if(scopeMode===2){
+    // ADSR: drag boundary lines
+    const xNorm=lx/SC.w;
+    const hitZone=5/SC.w;
+    if(Math.abs(xNorm-adsrBoundAD)<hitZone){scopeDragMode=3;adsrDragParam=P.envA}
+    else if(Math.abs(xNorm-adsrBoundDS)<hitZone){scopeDragMode=3;adsrDragParam=P.envD}
+    else if(Math.abs(xNorm-adsrBoundSR)<hitZone){scopeDragMode=3;adsrDragParam=P.envR}
+    else if(xNorm>adsrBoundDS+hitZone&&xNorm<adsrBoundSR-hitZone&&Math.abs(ly/ch-adsrSustainY)<hitZone*3){
+      scopeDragMode=3;adsrDragParam=P.envS}
+    if(scopeDragMode===3)scopeDragStartVal[0]=paramValues[adsrDragParam]}
+  drawAll();e.preventDefault();return}
+const key=m2k(pos.x,pos.y);if(key>=0&&paramValues[P.power]>0.5){
+  // Transpose mode: click sets transpose offset, doesn't play
+  if(paramValues[P.transpose]>0.5){
+    const midiNote=key+KB.minNote;
+    const offset=midiNote-60; // semitones from middle C
+    transposeKey=(offset===0)?-1:key;
+    synth.setParam(P.transposeOfs,offset);
+    drawAll();return}
+  if(paramValues[P.hold]>0.5&&kbKeys[key]){
+    kbKeys[key]=0;synth.forceRelease(key+KB.minNote);drawAll();return}
+  kbKeys[key]=1;kbPressedKey=key;kbDragging=true;synth.noteOn(key+KB.minNote,127);drawAll();return}
+const ci=hitC(pos.x,pos.y);if(ci<0)return;const[p,t]=controls[ci];
+if(t==='slider'||t==='knob'){dragCtrl=ci;dragStartY=e.clientY;dragStartVal=paramValues[p];dragAccum=paramValues[p];
+  document.body.style.cursor='none'}
+else if(t==='switch3'||t==='switch2'){dragCtrl=ci;dragStartY=e.clientY;dragStartVal=Math.round(paramValues[p])}
+else if(t==='hswitch3'||t==='hswitch2'){dragCtrl=ci;dragStartY=e.clientX;dragStartVal=Math.round(paramValues[p])}
+else if(t==='btnled'){pressedBtn=ci;paramValues[p]=paramValues[p]>0.5?0:1;synth.setParam(p,paramValues[p]);if(!liveParams.has(p))presetDirty=true;
+if(p===P.hold&&paramValues[p]<=0.5)kbKeys.fill(0);
+drawAll()}
+else if(t==='power'){paramValues[p]=paramValues[p]>0.5?0:1;synth.setParam(p,paramValues[p]);if(paramValues[p]<=0.5){kbKeys.fill(0);synth.controlChange(123,0)}drawAll()}
+else if(t==='bender'){dragCtrl=ci;dragStartY=e.clientX;dragStartVal=paramValues[p];benderDragStartY=e.clientY;benderTriggered=false}
+else if(t==='chorusoff'){pressedBtn=ci;paramValues[P.chorusI]=0;paramValues[P.chorusII]=0;synth.setParam(P.chorusI,0);synth.setParam(P.chorusII,0);if(!liveParams.has(p))presetDirty=true;drawAll()}
+else if(t==='gear'){menuOpen=!menuOpen;menuHover=-1;drawAll()}
+e.preventDefault()});
+
+// Prevent context menu on scope (right-click cycles mode)
+canvas.addEventListener('contextmenu',e=>{const pos=gmp(e);
+if(pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h)e.preventDefault()});
+
+const tip=()=>document.getElementById('tooltip');
+let tipCtrl=-1;
+
+function showTip(ci){
+  const tt=tip();
+  if(ci<0){tt.style.display='none';tipCtrl=-1;return}
+  const[p,t]=controls[ci];
+  const name=t==='chorusoff'?'Chorus Off':paramNames[p]||'';
+  if(!name){tt.style.display='none';tipCtrl=-1;return}
+  let val='';
+  if(t==='slider'||t==='knob')val=paramValueText(p,paramValues[p]);
+  else if(t==='switch3'||t==='switch2'||t==='hswitch3'||t==='hswitch2'){
+    const labels=switchLabels[p];if(labels)val=labels[Math.round(paramValues[p])]}
+  else if(t==='btnled')val=paramValues[p]>0.5?'On':'Off';
+  tt.textContent=val?name+': '+val:name;
+  tt.style.display='block';
+  const b=ctrlBounds(controls[ci]);const rect=canvas.getBoundingClientRect();
+  const sx=rect.width/W,sy=rect.height/H;
+  tt.style.left=Math.max(0,(b.x+b.w/2)*sx-tt.offsetWidth/2)+'px';
+  tt.style.top=((b.y+b.h)*sy+2)+'px';
+  tipCtrl=ci;
+}
+
+canvas.addEventListener('mouseleave',()=>{tip().style.display='none';tipCtrl=-1});
+canvas.addEventListener('mousemove',e=>{
+if(sheetOpen){const pos=gmp(e);
+  const overClose=pos.x>=W-14&&pos.y<14;
+  const idx=overClose?-2:sheetHitTest(pos.x,pos.y);
+  if(idx!==sheetHover){sheetHover=idx;drawPresetSheet()}tip().style.display='none';tipCtrl=-1;return}
+if(menuOpen){const pos=gmp(e);
+  const mw=180,mh=menuItems.length*14;
+  const mmx=Math.round((W-mw)/2),mmy=Math.round((H-mh)/2);
+  let row=-1;
+  if(pos.x>=mmx&&pos.x<mmx+mw&&pos.y>=mmy&&pos.y<mmy+mh)
+    row=Math.floor((pos.y-mmy)/14);
+  if(row>=0&&row<menuItems.length&&(menuItems[row].type==='sep'||menuItems[row].type==='label'))row=-1;
+  if(row!==menuHover){menuHover=row;drawSettingsMenu()}
+  tip().style.display='none';tipCtrl=-1;return}
+if(dragCtrl!==null){showTip(dragCtrl);return}
+const pos=gmp(e);
+// Scope nav hover (all modes)
+if(pos.x>=SC.x&&pos.x<SC.x+SC.w&&pos.y>=SC.y&&pos.y<SC.y+SC.h){
+  const ly=pos.y-SC.y,lx=pos.x-SC.x;
+  const ch=SC.h-kNavH;
+  let nh=-1;
+  if(ly>=ch) nh=lx<kNavArrowW?0:(lx>=SC.w-kNavArrowW?1:-1);
+  if(nh!==navHover){navHover=nh;drawAll()}
+  // ADSR cursor
+  if(scopeMode===2&&ly<ch){
+    const xNorm=lx/SC.w,hitZone=5/SC.w;
+    if(Math.abs(xNorm-adsrBoundAD)<hitZone||Math.abs(xNorm-adsrBoundDS)<hitZone||Math.abs(xNorm-adsrBoundSR)<hitZone)
+      canvas.style.cursor='ew-resize';
+    else if(xNorm>adsrBoundDS+hitZone&&xNorm<adsrBoundSR-hitZone&&Math.abs(ly/ch-adsrSustainY)<hitZone*3)
+      canvas.style.cursor='ns-resize';
+    else canvas.style.cursor=''}}
+else{if(navHover>=0){navHover=-1;drawAll()}canvas.style.cursor=''}
+const ci=hitC(pos.x,pos.y);
+if(ci!==tipCtrl)showTip(ci)});
+
+window.addEventListener('mousemove',e=>{
+// Scope interactive drags
+if(scopeDragMode>0){
+  const dx=e.clientX-scopeDragStartX,dy=e.clientY-scopeDragStartY;
+  const gear=e.shiftKey?500:128;
+  const ch=SC.h-kNavH;
+  if(scopeDragMode===1){
+    // Volume
+    paramValues[P.masterVol]=Math.max(0,Math.min(1,scopeDragStartVal[0]+(dx-dy)/gear));
+    synth.setParam(P.masterVol,paramValues[P.masterVol])}
+  else if(scopeDragMode===2){
+    // VCF: direct position
+    const pos=gmp(e);
+    const lx=pos.x-SC.x,ly=pos.y-SC.y;
+    paramValues[P.vcfFreq]=Math.max(0,Math.min(1,lx/SC.w));
+    paramValues[P.vcfRes]=Math.max(0,Math.min(1,1-ly/ch));
+    synth.setParam(P.vcfFreq,paramValues[P.vcfFreq]);
+    synth.setParam(P.vcfRes,paramValues[P.vcfRes]);
+    if(!liveParams.has(P.vcfFreq))presetDirty=true}
+  else if(scopeDragMode===3){
+    // ADSR
+    let delta;
+    if(adsrDragParam===P.envS)delta=-dy/gear;
+    else if(adsrDragParam===P.envR)delta=-dx/gear;
+    else delta=dx/gear;
+    paramValues[adsrDragParam]=Math.max(0,Math.min(1,scopeDragStartVal[0]+delta));
+    synth.setParam(adsrDragParam,paramValues[adsrDragParam]);
+    if(!liveParams.has(adsrDragParam))presetDirty=true}
+  drawAll();return}
+if(pbDragging){const pos=gmp(e);
+  pbDragEndX=Math.max(0,Math.min(SC.w-1,pos.x-SC.x));
+  pbDragEndY=Math.max(0,Math.min(SC.h-1,pos.y-SC.y));
+  drawAll();return}
+if(kbDragging){const pos=gmp(e);const key=m2k(pos.x,pos.y);
+if(key!==kbPressedKey){
+  if(kbPressedKey>=0){if(paramValues[P.hold]<=0.5)kbKeys[kbPressedKey]=0;synth.noteOff(kbPressedKey+KB.minNote)}
+  if(key>=0){kbKeys[key]=1;kbPressedKey=key;synth.noteOn(key+KB.minNote,127)}else{kbPressedKey=-1}
+  drawAll()}return}
+if(dragCtrl===null)return;const[p,t]=controls[dragCtrl];
+if(t==='slider'||t==='knob'){
+  const dy=dragStartY-e.clientY;dragStartY=e.clientY;
+  let gear=p===P.tuning?205:127;
+  if(e.metaKey||e.ctrlKey)gear*=100;else if(e.shiftKey)gear*=10;
+  dragAccum=Math.max(0,Math.min(1,dragAccum+dy/gear));
+  let nv=dragAccum;
+  // Tuning: three-zone center snap (100px neg, 6px detent, 100px pos)
+  if(p===P.tuning){
+    const px=nv*205,half=102.5,snapHalf=3;
+    const negEnd=half-snapHalf,posStart=half+snapHalf;
+    if(px<=negEnd)nv=(px/negEnd)*0.495;
+    else if(px>=posStart)nv=0.505+((px-posStart)/(205-posStart))*0.495;
+    else{nv=0.5;if(!tuningInSnap)dragAccum=0.5;tuningInSnap=true}
+    if(px<=negEnd||px>=posStart)tuningInSnap=false}
+  if(p===P.hpfFreq)nv=Math.round(nv*3)/3;
+  paramValues[p]=nv;synth.setParam(p,p===P.hpfFreq?nv*3:p===P.tuning?nv*2-1:nv);if(!liveParams.has(p))presetDirty=true}
+else if(t==='switch3'||t==='switch2'){const mx=t==='switch3'?2:1;paramValues[p]=Math.max(0,Math.min(mx,Math.round(dragStartVal+(e.clientY-dragStartY)/12)));synth.setParam(p,paramValues[p]);if(!liveParams.has(p))presetDirty=true}
+else if(t==='hswitch3'||t==='hswitch2'){const mx=t==='hswitch3'?2:1;
+  const oldVal=paramValues[p];
+  paramValues[p]=Math.max(0,Math.min(mx,Math.round(dragStartVal+(e.clientX-dragStartY)/12)));synth.setParam(p,paramValues[p]);if(!liveParams.has(p))presetDirty=true;
+  if(p===P.adsrMode&&Math.round(oldVal)!==Math.round(paramValues[p])){
+    // DSP remap already happened inside setParam; read back remapped slider values
+    paramValues[P.vcfFreq]=synth.getVcfSlider();
+    paramValues[P.hpfFreq]=synth.getHpfSlider()/3;
+    synth.setBankOffset(paramValues[p]<0.5?0:1)}}
+else if(t==='bender'){const dx=e.clientX-dragStartY;paramValues[p]=Math.max(0,Math.min(1,dragStartVal+dx/100));synth.setParam(p,paramValues[p]*2-1);
+  const trig=e.clientY<benderDragStartY-8;if(trig!==benderTriggered){benderTriggered=trig;synth.controlChange(1,trig?1:0)}}
+showTip(dragCtrl);drawAll()});
+
+window.addEventListener('mouseup',()=>{
+if(scopeDragMode>0){scopeDragMode=0;canvas.style.cursor='';drawAll()}
+if(pbDragging){
+  pbDragging=false;
+  const dx=pbDragEndX-pbDragOriginX,dy=pbDragEndY-pbDragOriginY;
+  const mag=Math.sqrt(dx*dx+dy*dy);
+  const releaseIdx=pbPatchAt(pbDragEndX,pbDragEndY);
+  const originIdx=pbPatchAt(pbDragOriginX,pbDragOriginY);
+  if(releaseIdx!==originIdx&&mag>1){
+    const norm=Math.min(mag/80,1);
+    pbBallSpeed=norm*norm*0.45;pbBallAccum=0;pbBallErrX=0;pbBallErrY=0;
+    pbBallCellX=originIdx%kPBCols;pbBallCellY=Math.floor(originIdx/kPBCols);
+    pbBallDX=-dx/mag;pbBallDY=-dy/mag;pbBallActive=true}
+  drawAll()}
+if(dragCtrl!==null){
+  const dt=controls[dragCtrl][1];
+  if(dt==='bender'){paramValues[P.bender]=0.5;synth.setParam(P.bender,0);if(benderTriggered){benderTriggered=false;synth.controlChange(1,0)}drawAll()}
+  if(dt==='slider'||dt==='knob'){document.body.style.cursor='';
+    const dp=controls[dragCtrl][0];
+    if(dp===P.hpfFreq){const sn=Math.round(paramValues[dp]*3)/3;if(sn!==paramValues[dp]){paramValues[dp]=sn;synth.setParam(dp,sn*3)}}}}
+dragCtrl=null;tip().style.display='none';tipCtrl=-1;if(pressedBtn>=0){pressedBtn=-1;drawAll()}
+if(kbDragging){if(kbPressedKey>=0){if(paramValues[P.hold]<=0.5)kbKeys[kbPressedKey]=0;synth.noteOff(kbPressedKey+KB.minNote)}kbPressedKey=-1;kbDragging=false;drawAll()}});}
+
+// ===== QWERTY =====
+let QBASE=48;
+function qn(k){switch(k){case'z':return QBASE;case'x':return QBASE+2;case'c':return QBASE+4;case'v':return QBASE+5;case'b':return QBASE+7;case'n':return QBASE+9;case'm':return QBASE+11;case',':return QBASE+12;case'.':return QBASE+14;case'/':return QBASE+16;case's':return QBASE+1;case'd':return QBASE+3;case'g':return QBASE+6;case'h':return QBASE+8;case'j':return QBASE+10;case'l':return QBASE+13;case';':return QBASE+15;case"'":return QBASE+17;case'q':return QBASE+12;case'w':return QBASE+14;case'e':return QBASE+16;case'r':return QBASE+17;case't':return QBASE+19;case'y':return QBASE+21;case'u':return QBASE+23;case'i':return QBASE+24;case'o':return QBASE+26;case'p':return QBASE+28;case'[':return QBASE+29;case']':return QBASE+31;case'2':return QBASE+13;case'3':return QBASE+15;case'5':return QBASE+18;case'6':return QBASE+20;case'7':return QBASE+22;case'9':return QBASE+25;case'0':return QBASE+27;case'-':return QBASE+30;case'=':return QBASE+32;default:return -1}}
+const qd={};
+document.addEventListener('keydown',e=>{
+if(!audioStarted)return;
+if(sheetOpen){
+  if(e.key==='Escape'){
+    if(sheetSearch){sheetSearch='';drawPresetSheet()}
+    else{sheetOpen=false;sheetSearch='';drawAll()}
+    e.preventDefault();return}
+  if(e.key==='Backspace'){
+    if(sheetSearch){sheetSearch=sheetSearch.slice(0,-1);drawPresetSheet()}
+    e.preventDefault();return}
+  if(e.key==='Enter'){
+    if(sheetHover>=0){currentPreset=sheetHover;synth.loadPreset(sheetHover);syncFP(sheetHover)}
+    sheetOpen=false;sheetSearch='';drawAll();e.preventDefault();return}
+  if(e.key==='ArrowRight'){
+    const n=sheetSearch?sheetFindNext(sheetHover+1,1):((sheetHover<0?currentPreset:sheetHover)+1)%128;
+    if(n>=0)sheetHover=n;drawPresetSheet();e.preventDefault();return}
+  if(e.key==='ArrowLeft'){
+    const n=sheetSearch?sheetFindNext(sheetHover-1,-1):((sheetHover<0?currentPreset:sheetHover)+127)%128;
+    if(n>=0)sheetHover=n;drawPresetSheet();e.preventDefault();return}
+  if(e.key==='ArrowDown'){
+    let start=sheetHover<0?currentPreset:sheetHover;
+    const col=start%sheetCols;
+    for(let i=1;i<=sheetRows;i++){const idx=((start+sheetCols*i)%128+128)%128;
+      if((idx%sheetCols)===col&&(!sheetSearch||sheetMatches(idx))){sheetHover=idx;break}}
+    drawPresetSheet();e.preventDefault();return}
+  if(e.key==='ArrowUp'){
+    let start=sheetHover<0?currentPreset:sheetHover;
+    const col=start%sheetCols;
+    for(let i=1;i<=sheetRows;i++){const idx=((start-sheetCols*i)%128+128)%128;
+      if((idx%sheetCols)===col&&(!sheetSearch||sheetMatches(idx))){sheetHover=idx;break}}
+    drawPresetSheet();e.preventDefault();return}
+  if(e.key.length===1&&e.key>=' '&&e.key.charCodeAt(0)<127){
+    sheetSearch+=e.key;
+    if(sheetSearch)sheetHover=sheetFindNext(0,1);
+    drawPresetSheet();e.preventDefault();return}
+  return}
+if(menuOpen){if(e.key==='Escape'){menuOpen=false;drawAll()}return}
+if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+  const dir=e.key==='ArrowUp'?-1:1;const n=synth.getNumPresets();if(n>0){currentPreset=((currentPreset+dir)%n+n)%n;synth.loadPreset(currentPreset);syncFP(currentPreset);drawAll()}e.preventDefault();return}
+if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+  cycleScopeMode(e.key==='ArrowRight'?1:-1);drawAll();e.preventDefault();return}
+if(e.key==='PageUp'||e.key==='PageDown'){
+  const dir=e.key==='PageUp'?-8:8;const n=synth.getNumPresets();if(n>0){currentPreset=((currentPreset+dir)%n+n)%n;synth.loadPreset(currentPreset);syncFP(currentPreset);drawAll()}e.preventDefault();return}
+if(e.key==='Enter'){togglePP(e);e.preventDefault();return}
+if(e.key==='`'){QBASE=Math.max(24,QBASE-12);e.preventDefault();return}
+if(e.key==='1'){QBASE=Math.min(84,QBASE+12);e.preventDefault();return}
+if(e.repeat||!canvas||paramValues[P.power]<=0.5)return;const n=qn(e.key.toLowerCase());if(n<0)return;const ki=n-KB.minNote;if(ki<0||ki>=61||qd[n])return;
+if(paramValues[P.transpose]>0.5){
+  const offset=n-60;transposeKey=(offset===0)?-1:ki;
+  synth.setParam(P.transposeOfs,offset);drawAll();return}
+qd[n]=1;kbKeys[ki]=1;synth.noteOn(n,127);drawAll()});
+document.addEventListener('keyup',e=>{if(!canvas)return;const n=qn(e.key.toLowerCase());if(n<0||!qd[n])return;delete qd[n];const ki=n-KB.minNote;if(ki>=0&&ki<61)kbKeys[ki]=0;synth.noteOff(n);drawAll()});
+
+// Release all notes on blur/tab away
+function releaseAll(){
+  pbBallActive=false;pbDragging=false;
+  // Reset bender if it was being dragged
+  if(dragCtrl!==null&&controls[dragCtrl][1]==='bender'){
+    paramValues[P.bender]=0.5;synth.setParam(P.bender,0)}
+  if(dragCtrl!==null&&(controls[dragCtrl][1]==='slider'||controls[dragCtrl][1]==='knob'))
+    document.body.style.cursor='';
+  dragCtrl=null;kbDragging=false;
+  for(const n in qd){const note=parseInt(n);synth.noteOff(note);const ki=note-KB.minNote;if(ki>=0&&ki<61)kbKeys[ki]=0}
+  for(const k in qd)delete qd[k];
+  if(kbPressedKey>=0){if(paramValues[P.hold]<=0.5)kbKeys[kbPressedKey]=0;synth.noteOff(kbPressedKey+KB.minNote);kbPressedKey=-1}
+  if(synth.ctx&&synth.ctx.state==='running')synth.ctx.suspend();
+  drawAll()}
+function resumeAudio(){
+  if(synth.ctx&&synth.ctx.state==='suspended')synth.ctx.resume()}
+window.addEventListener('blur',releaseAll);
+window.addEventListener('focus',resumeAudio);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseAll();else resumeAudio()});
+
+// ===== Preset Sheet =====
+let sheetOpen=false, sheetHover=-1, sheetSearch='';
+const sheetCols=8, sheetRows=16;
+
+function sheetHitTest(mx,my){
+  const colW=W/sheetCols, rowH=H/sheetRows;
+  const col=Math.floor(mx/colW), row=Math.floor(my/rowH);
+  if(col<0||col>=sheetCols||row<0||row>=sheetRows)return -1;
+  const idx=row*sheetCols+col;
+  return idx<128?idx:-1;
+}
+function sheetMatches(idx){
+  if(!sheetSearch)return true;
+  return synth.getPresetName(idx).toLowerCase().includes(sheetSearch.toLowerCase());
+}
+function sheetFindNext(from,step){
+  for(let i=0;i<128;i++){const idx=((from+step*i)%128+128)%128;if(sheetMatches(idx))return idx}
+  return -1;
+}
+
+function drawPresetSheet(){
+  ctx.save();ctx.scale(S,S);
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  const colW=W/sheetCols, rowH=H/sheetRows;
+  ctx.font="11px 'Segment14', monospace";
+
+  ctx.fillStyle='#002800';
+  for(let row=0;row<=sheetRows;row++){const y=Math.round(row*rowH);ctx.fillRect(0,y,W,1)}
+  for(let col=1;col<sheetCols;col++){const x=Math.round(col*colW);ctx.fillRect(x,0,1,H)}
+
+  for(let i=0;i<128;i++){
+    const col=i%sheetCols, row=Math.floor(i/sheetCols);
+    const x=Math.round(col*colW), y=Math.round(row*rowH);
+    const cw=Math.round((col+1)*colW)-x, ch=Math.round((row+1)*rowH)-y;
+    const name=synth.getPresetName(i).substring(0,16);
+    const matches=sheetMatches(i);
+
+    if(i===currentPreset){
+      ctx.fillStyle='#00ff00';ctx.fillRect(x,y,cw,ch);
+      ctx.fillStyle='#000';
+    }else if(matches&&i===sheetHover){
+      ctx.fillStyle='#003c00';ctx.fillRect(x,y,cw,ch);
+      ctx.fillStyle='#00ff00';
+    }else{
+      ctx.fillStyle=matches?'#00ff00':'#005a00';
+    }
+    ctx.fillText(name,x+4,y+ch-2);
+  }
+
+  const bx=W-14;
+  ctx.fillStyle=sheetHover===-2?'#003c00':'#000';ctx.fillRect(bx,0,14,14);
+  ctx.strokeStyle='#006400';ctx.lineWidth=1;ctx.strokeRect(bx+0.5,0.5,13,13);
+  ctx.fillStyle='#00ff00';
+  ctx.font="13px 'Segment14', monospace";ctx.fillText('x',bx+3,12);
+
+  ctx.strokeStyle='#006400';ctx.lineWidth=1;ctx.strokeRect(0,0,W,H);
+  ctx.restore();
+}
+
+function togglePP(e){
+  menuOpen=false;
+  sheetOpen=!sheetOpen;
+  if(sheetOpen){sheetHover=-1;sheetSearch='';drawPresetSheet()}else{sheetSearch='';drawAll()}}
+
+// ===== Preset sync =====
+// All live performance params excluded from presets (matches native PluginProcessor.cpp)
+const liveParams=new Set([
+  P.benderDco,P.benderVcf,P.arpRate, // sliders 0-19
+  P.transpose,P.hold,P.arpeggio,P.arpMode,P.arpRange, // switches 20-39
+  P.bender,P.tuning,P.power,P.portaMode, // switches 20-39
+  P.portaRate, // slider 40
+  P.transposeOfs,P.benderLfo, // switches 41-43
+  P.masterVol // 44
+]);
+function syncFP(pi){
+  for(let i=0;i<=19;i++){if(liveParams.has(i))continue;if(i===P.hpfFreq){paramValues[i]=synth.getPresetValue(pi,i)/3;continue}paramValues[i]=synth.getPresetValue(pi,i)/127}
+  if(!liveParams.has(P.portaRate))paramValues[P.portaRate]=synth.getPresetValue(pi,40)/127;
+  for(let i=20;i<=39;i++){if(liveParams.has(i))continue;paramValues[i]=synth.getPresetValue(pi,i)}
+  for(let i=41;i<=43;i++){if(liveParams.has(i))continue;paramValues[i]=synth.getPresetValue(pi,i)}
+  presetDirty=false;
+}
+
+// ===== Settings =====
+function loadSettings(){
+  try{const s=localStorage.getItem('kr106_settings');if(s)Object.assign(menuSettings,JSON.parse(s))}catch(e){}}
+function saveSettings(){
+  try{localStorage.setItem('kr106_settings',JSON.stringify(menuSettings))}catch(e){}}
+function applySettings(){
+  synth.setVoices(menuSettings.voices);
+  synth.setIgnoreVelocity(menuSettings.ignoreVel);
+  if(menuSettings.midiEnabled&&!synth._midiInit){
+    synth.initMidi().then(()=>{synth._midiInit=true;if(menuOpen)drawSettingsMenu()})
+      .catch((e)=>{menuSettings.midiEnabled=false;console.warn('MIDI init failed:',e);if(menuOpen)drawSettingsMenu()})}
+  saveSettings();
+  if(menuOpen)drawSettingsMenu()}
+
+// ===== Startup =====
+let audioStarted=false;
+async function startAudio(){
+if(audioStarted)return;audioStarted=true;
+document.getElementById('splash').style.display='none';
+document.getElementById('synth-wrap').style.display='block';
+initCanvas();
+paramValues[P.power]=1;paramValues[P.tuning]=0.5;paramValues[P.masterVol]=0.5;paramValues[P.bender]=0.5;
+try{
+  await loadImages();
+  await document.fonts.load("11px 'Segment14'");
+  drawAll();
+  await synth.init();
+  currentPreset=Math.floor(Math.random()*synth.getNumPresets());
+  synth.loadPreset(currentPreset);syncFP(currentPreset);
+  paramValues[P.tuning]=0.5;paramValues[P.masterVol]=0.5;paramValues[P.bender]=0.5;
+  paramValues[P.power]=1;paramValues[P.arpRate]=0.35;paramValues[P.portaMode]=1;
+  loadSettings();applySettings();
+  drawAll();
+  synth.onMidiNote=(note,on)=>{
+    if(on&&paramValues[P.transpose]>0.5){
+      const offset=note-60;
+      const ki=note-KB.minNote;
+      transposeKey=(offset===0)?-1:(ki>=0&&ki<61?ki:-1);
+      synth.setParam(P.transposeOfs,offset);
+      drawAll();return}
+    const ki=note-KB.minNote;
+    if(ki>=0&&ki<61){
+      if(on)kbKeys[ki]=1;
+      else if(paramValues[P.hold]<=0.5)kbKeys[ki]=0;
+      drawAll()}};
+  // AudioWorklet: VCF/HPF slider readback arrives async after preset load or model switch
+  synth.onPresetValues=(data)=>{
+    if(data.vcfSlider!==undefined)paramValues[P.vcfFreq]=data.vcfSlider;
+    if(data.hpfSlider!==undefined)paramValues[P.hpfFreq]=data.hpfSlider/3;
+    drawAll();
+  };
+  synth.onSliderUpdate=(data)=>{
+    if(data.vcfSlider!==undefined)paramValues[P.vcfFreq]=data.vcfSlider;
+    if(data.hpfSlider!==undefined)paramValues[P.hpfFreq]=data.hpfSlider/3;
+    drawAll();
+  };
+  // MIDI disabled by default — will be enabled from settings menu
+  // try{await synth.initMidi()}catch(e){}
+  let lastFrame=0;function scopeLoop(t){requestAnimationFrame(scopeLoop);if(t-lastFrame<66)return;lastFrame=t;
+if(!sheetOpen&&paramValues[P.power]>0.5){if(scopeClipHold>0)scopeClipHold--;ctx.save();ctx.scale(S,S);drawScope();drawClipLED(53,127);ctx.restore()}}scopeLoop(0);
+}catch(e){console.error(e)}}
