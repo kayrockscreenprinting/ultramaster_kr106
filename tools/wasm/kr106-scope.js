@@ -76,7 +76,7 @@ scopeSamplesAvail=len;
 // Signal consumed (ScriptProcessor double-buffer only)
 if(!sd.ringL&&synth.mod&&synth.mod._kr106_scope_consumed)synth.mod._kr106_scope_consumed();
 
-if(peak<1e-6){scopeHasData=false;return}
+if(peak<1e-6){scopeHasData=false;scopeDisplayLen=0;return}
 
 // Find two consecutive sync pulses (search backward from end)
 let endDist=-1,startDist=-1;
@@ -635,7 +635,7 @@ let aboutFrame=0;
 
 function buildAboutPixels(w,h){
   // Rasterize text into pixel array
-  const lines=['ULTRAMASTER','KR-106','2.5.5']; // UPDATE version here on release
+  const lines=['ULTRAMASTER','KR-106','2.5.6']; // UPDATE version here on release
   const pixels=[];
   const lineH=10; // 7px glyph + 3px gap
   const totalH=lines.length*lineH;
