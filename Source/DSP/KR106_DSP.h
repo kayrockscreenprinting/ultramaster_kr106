@@ -612,7 +612,12 @@ public:
   struct AnalogBW {
     float s = 0.f;
     float g = 1.f; // tan(pi * fc / sr); default 1.0 = passthrough until init()
-    void init(float fc, float sr) { g = tanf(3.14159265f * fc / sr); }
+    void init(float fc, float sr) {
+      // Clamp cutoff to 0.45 * Nyquist to keep tan() positive and stable.
+      // At 48 kHz, 38 kHz exceeds Nyquist and tan() goes negative → NaN.
+      float maxFc = sr * 0.45f;
+      g = tanf(3.14159265f * std::min(fc, maxFc) / sr);
+    }
     float process(float x) {
       float v = (x - s) * g / (1.f + g);
       float y = s + v;
