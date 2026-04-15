@@ -323,11 +323,6 @@ public:
   // TODO: J60 uses 50KB linear pot (vs J6 A10K). Downstream circuit may differ.
   static float vcfEnvDepth_j60(float t) { return vcfEnvDepth6(t); }
 
-  // vcfEnvDepth_j106() - J106: linear envelope modulation.
-  // Firmware multiplies env (0-255) by slider (0-254) via mul8x16.
-  // TODO: derive from ROM analysis if different from J6 curve.
-  static float vcfEnvDepth_j106(float t) { return vcfEnvDepth_j60(t); }
-
   // dcoLfoDepth106() - Maps normalized DCO LFO depth slider (0..1) to
   // peak pitch deviation in semitones (±4 st = ±400 cents at max).
   //
@@ -727,19 +722,22 @@ public:
     if (mModel == kJ106)
     {
       mFwEnvNext = mADSR.mEnvNext;
-      // Don't snap mFwEnvSmooth — let the 1ms RC filter smooth the onset,
-      // matching the real DAC output stage. Snapping causes clicks at attack=0.
 
-      // Compute initial VCF DAC with the post-attack envelope so the
-      // filter cutoff starts at the correct frequency on the first sample.
+      // Compute initial VCF DAC with the actual bend so the filter cutoff
+      // starts at the correct frequency on the first sample, even when the
+      // bender is deflected at note-on. LFO signal is zero here because the
+      // onset envelope is always zero at note-on — correct regardless of LFO phase.
       float glideMidi = mGlidePitch * 12.f + 69.f;
       uint16_t pitch88 = static_cast<uint16_t>(
           std::clamp(static_cast<int>(glideMidi * 256.f), 0, 127 << 8));
+      uint8_t bendVal = static_cast<uint8_t>(fabsf(mRawBend) * 255.f);
+      bool bendPol = (mRawBend < 0.f);
+      uint16_t vcfBendAmt = kr106::calc_vcf_bend_amt(mVcfBendSensInt, bendVal);
       bool envPol = (mVcfEnvInvert > 0);
       mVcfDacNext = kr106::calc_vcf_freq(
-          mVcfCutoffInt, 0, 0,
+          mVcfCutoffInt, 0, vcfBendAmt,
           mVcfEnvModInt, mVcfKeyTrackInt,
-          false, false, envPol,
+          false, bendPol, envPol,
           mADSR.mEnvInt, pitch88);
       mVcfDacSmooth = static_cast<float>(mVcfDacNext);
     }
