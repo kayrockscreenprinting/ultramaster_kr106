@@ -518,7 +518,11 @@ struct VCF
   // opportunities to hoist mC loads across the 4 consecutive calls and
   // to schedule instructions across the call boundary. Forcing inline
   // reclaimed ~2–4% CPU in microbenchmarks on Apple Silicon.
+#if defined(_MSC_VER)
+  __forceinline
+#else
   __attribute__((always_inline)) inline
+#endif
   float ProcessSample(float input)
   {
     // Fast white noise via bit-trick float conversion.

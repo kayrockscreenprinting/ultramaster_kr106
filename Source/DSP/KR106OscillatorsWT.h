@@ -287,7 +287,11 @@ struct OscillatorsWT {
   // Forced inline — see comment on VCF::ProcessSample. The out-of-line
   // body compiled to 344 lines of arm64 asm, which clang judged too
   // expensive to inline at -O3 despite it being the hottest call site.
+#if defined(_MSC_VER)
+  __forceinline
+#else
   __attribute__((always_inline)) inline
+#endif
   float ProcessSample(bool& sync)
   {
     // --- Phase accumulator ---
