@@ -7,6 +7,7 @@
 
 #include "KR106ADSR.h"
 #include "KR106OscillatorsWT.h"
+#include "KR106Resampler.h"
 #include "KR106VCA.h"
 #include "KR106VCF_OPTIMIZED.h"
 #include "KR106VcfFreqJ106.h"

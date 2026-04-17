@@ -72,10 +72,8 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       break;
     }
     case kVcfRes: {
-      float resByte = static_cast<float>(value) * 127.f;
-      ForEachVoice([value, resByte](kr106::Voice<T>& v) {
+      ForEachVoice([value](kr106::Voice<T>& v) {
         v.mVcfRes = static_cast<float>(value);
-        v.mVCF.mCacheResByte = resByte;
       });
       break;
     }

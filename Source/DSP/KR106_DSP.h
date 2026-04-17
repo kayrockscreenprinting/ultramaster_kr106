@@ -18,6 +18,7 @@
 #include "KR106Chorus.h"
 #include "KR106_HPF.h"
 #include "KR106AnalogNoise.h"
+#include "KR106Resampler.h"
 
 // Top-level KR-106 DSP orchestrator
 
@@ -471,20 +472,15 @@ public:
                                     kNumModulations, 0, nFrames);
     }
 
-    // Decimate Nx mono mix bus down to base rate, writing into outputs[0].
-    // AnalogBW runs at the oversampled rate for all modes.
+   // Decimate Nx mono mix bus down to base rate, writing into outputs[0].
     {
       const float* mix = mMixBusOS.data();
       if (mOversample == 4)
       {
         for (int s = 0; s < nFrames; s++)
         {
-          float a0 = mAnalogBW.process(mix[0]);
-          float a1 = mAnalogBW.process(mix[1]);
-          float a2 = mAnalogBW.process(mix[2]);
-          float a3 = mAnalogBW.process(mix[3]);
-          float a[2] = { a0, a1 };
-          float b[2] = { a2, a3 };
+          float a[2] = { mix[0], mix[1] };
+          float b[2] = { mix[2], mix[3] };
           float s2_0 = mMixDown2.process_sample(a);
           float s2_1 = mMixDown2.process_sample(b);
           float s1[2] = { s2_0, s2_1 };
@@ -496,9 +492,7 @@ public:
       {
         for (int s = 0; s < nFrames; s++)
         {
-          float a0 = mAnalogBW.process(mix[0]);
-          float a1 = mAnalogBW.process(mix[1]);
-          float s1[2] = { a0, a1 };
+          float s1[2] = { mix[0], mix[1] };
           outputs[0][s] = static_cast<T>(mMixDown1.process_sample(s1));
           mix += 2;
         }
@@ -506,7 +500,7 @@ public:
       else // 1x — no decimation
       {
         for (int s = 0; s < nFrames; s++)
-          outputs[0][s] = static_cast<T>(mAnalogBW.process(mix[s]));
+          outputs[0][s] = static_cast<T>(mix[s]);
       }
       // Mirror to right channel so the rest of the pre-chorus mono
       // chain sees consistent data (chorus overwrites both later).
@@ -610,15 +604,6 @@ public:
     mHPF.SetSampleRate(mSampleRate);
     mHPF.Init();
     mHPF.SetMode(1);
-    // Analog bandwidth filter now runs on the 4× mix bus, BEFORE the
-    // decimator (see ProcessBlock). Initializing at 4× the base rate
-    // means the 38 kHz pole lands where the hardware calibration
-    // expected it, regardless of host sample rate. At 44.1k/48k base
-    // the old code path clamped fc to ~0.45 * baseNyq, collapsing the
-    // pole to ~20 kHz and giving more top-end rolloff than intended;
-    // running at 4× fixes that.
-    mAnalogBW.init(38000.f, static_cast<float>(mSampleRate) * static_cast<float>(mOversample));
-    mAnalogBW.reset();
     mChorus.Init(mSampleRate);
     mFloorNoise.Init(mSampleRate); 
     mFloorRipple.SetMainsHz(60.f, mSampleRate);  // 50.f for EU
@@ -702,27 +687,6 @@ public:
   kr106::SawTables mSawTables;
   kr106::LFO mLFO;
   kr106::HPF mHPF;
-
-  // 1-pole TPT lowpass for analog bandwidth modeling
-  struct AnalogBW {
-    float s = 0.f;
-    float g = 1.f; // tan(pi * fc / sr); default 1.0 = passthrough until init()
-    void init(float fc, float sr) {
-      // Clamp cutoff to 0.45 * Nyquist to keep tan() positive and stable.
-      // At 48 kHz, 38 kHz exceeds Nyquist and tan() goes negative → NaN.
-      // NOTE: does NOT reset state. Callers that change fc/sr mid-stream
-      // should call reset() to avoid transients from mismatched state.
-      float maxFc = sr * 0.45f;
-      g = tanf(3.14159265f * std::min(fc, maxFc) / sr);
-    }
-    void reset() { s = 0.f; }
-    float process(float x) {
-      float v = (x - s) * g / (1.f + g);
-      float y = s + v;
-      s = y + v;
-      return y;
-    }
-  } mAnalogBW;
 
   kr106::Chorus mChorus;
   kr106::Arpeggiator mArp;
@@ -815,7 +779,7 @@ public:
   // resamplers would be worse.
   //
   // NOTE: Audio-thread only. This mutates Upsampler2x/Downsampler2x
-  // state arrays and the AnalogBW state non-atomically. JUCE routes
+  // state arrays non-atomically. JUCE routes
   // parameter changes through processBlock's parameter sync, so calls
   // originating from setValueNotifyingHost() arrive here on the audio
   // thread — safe. Do NOT call directly from a UI callback, message
@@ -835,12 +799,6 @@ public:
       v.mOscUp1.clear_buffers();
       v.mOscUp2.clear_buffers();
     });
-
-    // Analog BW: re-coefficient AND reset state. The new sr changes g,
-    // and feeding the old state through a filter with very different
-    // pole placement would transient audibly.
-    mAnalogBW.init(38000.f, mSampleRate * static_cast<float>(os));
-    mAnalogBW.reset();
 
     // Mix-bus decimators: clear, then re-prime with silence so the
     // polyphase IIR has a settled history before it sees real audio.
