@@ -12,6 +12,8 @@
 //   synth.loadPreset(0);
 //   await synth.initMidi();
 
+const KR106_CACHE = '1776384977';
+
 class KR106Audio {
   constructor() {
     this.ctx = null;
@@ -31,7 +33,7 @@ class KR106Audio {
 
     // Try AudioWorklet first
     try {
-      await this.ctx.audioWorklet.addModule('dist/kr106-processor.js');
+      await this.ctx.audioWorklet.addModule(`dist/kr106-processor.js?v=${KR106_CACHE}`);
       this.node = new AudioWorkletNode(this.ctx, 'kr106-processor', {
         outputChannelCount: [2]
       });
@@ -39,8 +41,8 @@ class KR106Audio {
       // Fetch both WASM glue JS and binary on main thread
       // (worklet has no fetch/importScripts)
       const [glueResp, wasmResp] = await Promise.all([
-        fetch('dist/kr106_dsp.js'),
-        fetch('dist/kr106_dsp.wasm')
+        fetch(`dist/kr106_dsp.js?v=${KR106_CACHE}`),
+        fetch(`dist/kr106_dsp.wasm?v=${KR106_CACHE}`)
       ]);
       const wasmText = await glueResp.text();
       const wasmBinary = await wasmResp.arrayBuffer();
@@ -73,7 +75,7 @@ class KR106Audio {
       // Load a second WASM instance on the main thread for stateless queries
       // (tooltip Hz/ms/dB conversions). No kr106_create -- just the pure functions.
       const script = document.createElement('script');
-      script.src = 'dist/kr106_dsp.js';
+      script.src = `dist/kr106_dsp.js?v=${KR106_CACHE}`;
       await new Promise((res, rej) => { script.onload = res; script.onerror = rej; document.head.appendChild(script); });
       this.mod = await createKR106();
 
@@ -85,7 +87,7 @@ class KR106Audio {
         this._presetNames[i] = this.mod.UTF8ToString(ptr);
       }
 
-      console.log('KR-106 ready (AudioWorklet): ' + sr + ' Hz');
+      console.log(`KR-106 ready (AudioWorklet): ${sr} Hz, cache=${KR106_CACHE}`);
       return;
     } catch (err) {
       console.warn('AudioWorklet failed, falling back to ScriptProcessor:', err.message);
@@ -93,7 +95,7 @@ class KR106Audio {
 
     // Fallback: ScriptProcessorNode on main thread
     const script = document.createElement('script');
-    script.src = 'dist/kr106_dsp.js';
+    script.src = `dist/kr106_dsp.js?v=${KR106_CACHE}`;
     await new Promise((resolve, reject) => {
       script.onload = resolve;
       script.onerror = reject;
@@ -135,7 +137,7 @@ class KR106Audio {
       this._presetNames[i] = this.mod.UTF8ToString(ptr);
     }
 
-    console.log('KR-106 ready (ScriptProcessor): ' + sr + ' Hz');
+    console.log(`KR-106 ready (ScriptProcessor): ${sr} Hz, cache=${KR106_CACHE}`);
   }
 
   _fetchPresetNames() {

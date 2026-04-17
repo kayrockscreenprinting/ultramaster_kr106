@@ -26,6 +26,7 @@ EMFLAGS = \
 	--no-entry
 
 SCOPE_JS = kr106-scope.js
+INDEX_HTML = ../../docs/website/index.html
 
 all: kr106_dsp.js version
 
@@ -33,9 +34,12 @@ kr106_dsp.js: kr106_wasm.cpp $(wildcard $(DSP)/*.h) $(PRESETS)
 	$(EMCC) $(CXXFLAGS) $(EMFLAGS) -o kr106_dsp.js kr106_wasm.cpp
 
 BUILD_DATE := $(shell date +%m-%d\ %H:%M)
+BUILD_HASH := $(shell date +%s)
 
 version:
 	@sed -i '' "s/const lines=\['ULTRAMASTER','KR-106','[^']*','BUILD [^']*'\]/const lines=['ULTRAMASTER','KR-106','$(VERSION)','BUILD $(BUILD_DATE)']/" $(SCOPE_JS)
+	@sed -i '' "s/const KR106_CACHE = '[^']*'/const KR106_CACHE = '$(BUILD_HASH)'/" kr106-audio.js
+	@sed -i '' 's/\(dist\/kr106[^"]*\.js\)?v=[^"]*/\1?v=$(BUILD_HASH)/g' $(INDEX_HTML)
 	@echo "Updated scope version to $(VERSION) build $(BUILD_DATE)"
 
 # Dev server for testing (requires python3)
