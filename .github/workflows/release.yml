@@ -120,7 +120,7 @@ jobs:
           if [ -d "$ARTS/Release/VST3" ]; then ARTS="$ARTS/Release"; fi
           cp -R "$ARTS/VST3/Ultramaster KR-106.vst3" pkg/
           cp -R "$ARTS/CLAP/Ultramaster KR-106.clap" pkg/
-          cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
+          [ -d "$ARTS/LV2/Ultramaster KR-106.lv2" ] && cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/Standalone/Ultramaster KR-106.exe" pkg/
           cp docs/README.md pkg/
           cd pkg && 7z a ../${{ matrix.artifact }}.zip .
