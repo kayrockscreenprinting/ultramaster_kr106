@@ -6,13 +6,22 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            cmake_arch: x64
+            artifact: KR106-Windows
+          - arch: arm64
+            cmake_arch: ARM64
+            artifact: KR106-Windows-ARM64
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Configure
-        run: cmake -B build -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_SYSTEM_VERSION=10.0 -DKR106_COPY_AFTER_BUILD=OFF
+        run: cmake -B build -A ${{ matrix.cmake_arch }} -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_SYSTEM_VERSION=10.0 -DKR106_COPY_AFTER_BUILD=OFF
 
       - name: Build
         run: cmake --build build --config Release
@@ -28,9 +37,9 @@ jobs:
           cp -R "$ARTS/LV2/Ultramaster KR-106.lv2" pkg/
           cp -R "$ARTS/Standalone/Ultramaster KR-106.exe" pkg/
           cp docs/README.md pkg/
-          cd pkg && 7z a ../KR106-Windows.zip .
+          cd pkg && 7z a ../${{ matrix.artifact }}.zip .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KR106-Windows
-          path: KR106-Windows.zip
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
