@@ -100,6 +100,7 @@ jobs:
             artifact: KR106-Windows
           - arch: arm64
             cmake_arch: ARM64
+            cmake_extra: -DKR106_NO_LV2=ON
             artifact: KR106-Windows-ARM64
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +108,7 @@ jobs:
           submodules: recursive
 
       - name: Configure
-        run: cmake -B build -A ${{ matrix.cmake_arch }} -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_SYSTEM_VERSION=10.0 -DKR106_COPY_AFTER_BUILD=OFF
+        run: cmake -B build -A ${{ matrix.cmake_arch }} ${{ matrix.cmake_extra }} -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_SYSTEM_VERSION=10.0 -DKR106_COPY_AFTER_BUILD=OFF
 
       - name: Build
         run: cmake --build build --config Release

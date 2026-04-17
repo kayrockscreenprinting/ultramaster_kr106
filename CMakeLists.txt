@@ -6,10 +6,8 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
 add_subdirectory(libs/JUCE)
 add_subdirectory(libs/clap-juce-extensions EXCLUDE_FROM_ALL)
 
-# JUCE cannot cross-compile LV2 (it runs a tool on the host to generate
-# the manifest). Exclude LV2 when cross-compiling for ARM64 on x64.
-if(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64" OR
-   (CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64" AND CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "AMD64"))
+option(KR106_NO_LV2 "Disable LV2 format (required for ARM64 cross-compile)" OFF)
+if(KR106_NO_LV2)
   set(KR106_FORMATS AU VST3 Standalone)
 else()
   set(KR106_FORMATS AU VST3 LV2 Standalone)
