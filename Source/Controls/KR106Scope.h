@@ -961,7 +961,6 @@ private:
         float fcSlider = fc;
         float sr = static_cast<float>(mProcessor->getSampleRate());
         float nyq = std::max(sr * 0.5f, 1.f);
-        float comp = kr106::VCF::InputComp(k);
 
         // Display range
         static constexpr float kMinHz = 5.f;
@@ -1007,11 +1006,10 @@ private:
         }
 
         // Evaluate and draw magnitude response (normalized to 0 dB at DC)
-        // The transfer function for a 4-pole cascade with feedback k and
-        // input compensation comp is:
-        //   H(s) = comp / ((1 + s/wc)^4 + k)
+        // Transfer function for a 4-pole cascade with feedback k:
+        //   H(s) = 1 / ((1 + s/wc)^4 + k)
         // In normalized frequency (x = f/fc):
-        //   |H|² = comp² / ((1+x²)⁴ + 2k(1+x²)²cos(4·atan(x)) + k²)
+        //   |H|² = 1 / ((1+x²)⁴ + 2k(1+x²)²cos(4·atan(x)) + k²)
         float k2 = k * k;
 
         // Normalize to 0 dB at DC: denominator at x=0 is (1 + k)^2 for |H|^2

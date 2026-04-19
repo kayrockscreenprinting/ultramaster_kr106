@@ -130,6 +130,8 @@ KR106AudioProcessor::KR106AudioProcessor()
       displayFmt = [f = std::move(displayFmt)](float v, int maxLen) {
         juce::String base = f ? f(v, maxLen)
                               : juce::String(juce::roundToInt(v * 100.f)) + "%";
+        if (base.containsChar('['))
+          return base;
         return base + " [" + juce::String(juce::roundToInt(v * 127.f)) + "]";
       };
     }
@@ -308,7 +310,22 @@ KR106AudioProcessor::KR106AudioProcessor()
                    text.getFloatValue());
   };
   addSlider(kDcoLfo,     "DCO LFO",     0.f, 0.f, 1.f, fmtDcoLfo, parseDcoLfo);
-  addSlider(kDcoPwm,     "DCO PWM",     0.5f, 0.f, 1.f, fmtPct, parsePct);
+  // PWM: J106 slider limited to byte 105 by R5/R6; J6/J60 full 0-127
+  SFV fmtPwm = [this](float v, int) -> juce::String {
+    int maxByte = (mDSP.mSynthModel == kr106::kJ106) ? 105 : 127;
+    return juce::String(juce::roundToInt(v * 100.f)) + "%"
+         + " [" + juce::String(juce::roundToInt(v * maxByte)) + "]";
+  };
+  VFS parsePwm = [this](const juce::String& text) -> float {
+    int bs = text.indexOfChar('[');
+    int be = text.indexOfChar(']');
+    if (bs >= 0 && be > bs) {
+      int maxByte = (mDSP.mSynthModel == kr106::kJ106) ? 105 : 127;
+      return juce::jlimit(0.f, 1.f, text.substring(bs + 1, be).getFloatValue() / maxByte);
+    }
+    return juce::jlimit(0.f, 1.f, text.trimCharactersAtEnd("%").getFloatValue() / 100.f);
+  };
+  addSlider(kDcoPwm,     "DCO PWM",     0.5f, 0.f, 1.f, fmtPwm, parsePwm);
   addSlider(kDcoSub,     "DCO Sub",     1.f, 0.f, 1.f, fmtPct, parsePct);
   addSlider(kDcoNoise,   "DCO Noise",   0.f, 0.f, 1.f, fmtPct, parsePct);
 
@@ -576,7 +593,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           apr[0] = 0xF0; apr[1] = 0x41; apr[2] = 0x31; apr[3] = 0x00;
           apr[4] = 0x00; // no patch number in manual mode
           for (int cc = 0; cc < 16; cc++)
-            apr[5 + cc] = static_cast<uint8_t>(juce::roundToInt(getParamValue(kSysExToParam[cc]) * 127.f));
+            apr[5 + cc] = static_cast<uint8_t>(juce::roundToInt(getParamValue(kSysExToParam[cc]) * ((cc == 0x03) ? 105.f : 127.f)));
           {
             int oct = juce::roundToInt(getParamValue(kOctTranspose));
             uint8_t sw1 = 0;
@@ -610,7 +627,8 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           int sx = sParamToSysEx[i];
           if (sx >= 0)
           {
-            uint8_t val = static_cast<uint8_t>(juce::roundToInt(cur * 127.f));
+            float byteScale = (sx == 0x03) ? 105.f : 127.f;
+            uint8_t val = static_cast<uint8_t>(juce::roundToInt(cur * byteScale));
             uint8_t sysex[] = { 0xF0, 0x41, 0x32, 0x00,
                                  static_cast<uint8_t>(sx), val, 0xF7 };
             midiOut.addEvent(sysex, 7, 0);
@@ -663,7 +681,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           {
             int ccVal = (i == kHpfFreq)
                 ? juce::roundToInt(cur) * 32  // 0-3 -> 0/32/64/96
-                : juce::roundToInt(cur * 127.f);
+                : juce::roundToInt(cur * ((i == kDcoPwm && mDSP.mSynthModel == kr106::kJ106) ? 105.f : 127.f));
             midiOut.addEvent(juce::MidiMessage::controllerEvent(1, cc,
                 juce::jlimit(0, 127, ccVal)), 0);
           }
@@ -774,7 +792,13 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       {
         if (mParamCC[i] == cc)
         {
-          mParams[i]->setValueNotifyingHost(msg.getControllerValue() / 127.f);
+          int val = msg.getControllerValue();
+          // J106: R5/R6 limit PWM slider to byte 105
+          if (i == kDcoPwm && mDSP.mSynthModel == kr106::kJ106) {
+            val = juce::jmin(val, 105);
+            mParams[i]->setValueNotifyingHost(val / 105.f);
+          } else
+            mParams[i]->setValueNotifyingHost(val / 127.f);
           userHandled = true;
         }
       }
@@ -813,8 +837,15 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           if (hpf > 3) hpf = 3;
           mParams[param]->setValueNotifyingHost(mParams[param]->convertTo0to1(static_cast<float>(hpf)));
         }
-        else
-          mParams[param]->setValueNotifyingHost(msg.getControllerValue() / 127.f);
+        else {
+          int val = msg.getControllerValue();
+          // J106: R5/R6 limit PWM slider to byte 105
+          if (param == kDcoPwm && mDSP.mSynthModel == kr106::kJ106) {
+            val = juce::jmin(val, 105);
+            mParams[param]->setValueNotifyingHost(val / 105.f);
+          } else
+            mParams[param]->setValueNotifyingHost(val / 127.f);
+        }
       }
     }
     else if (msg.isPitchWheel())
@@ -837,7 +868,12 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           int val  = data[4];
           if (ctrl <= 0x0F)
           {
-            mParams[kSysExToParam[ctrl]]->setValueNotifyingHost(val / 127.f);
+            // J106: R5/R6 limit PWM slider to byte 105
+            if (ctrl == 0x03) {
+              val = juce::jmin(val, 105);
+              mParams[kSysExToParam[ctrl]]->setValueNotifyingHost(val / 105.f);
+            } else
+              mParams[kSysExToParam[ctrl]]->setValueNotifyingHost(val / 127.f);
             // J106 has no sub switch; infer from sub level
             if (ctrl == 0x0F)
               mParams[kDcoSubSw]->setValueNotifyingHost(val > 0 ? 1.f : 0.f);
@@ -855,8 +891,15 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
           const uint8_t* p = data + 4;
 
           // Set all 18 params
-          for (int cc = 0; cc < 16; cc++)
-            mParams[kSysExToParam[cc]]->setValueNotifyingHost(p[cc] / 127.f);
+          for (int cc = 0; cc < 16; cc++) {
+            int v = p[cc];
+            // J106: R5/R6 limit PWM slider to byte 105
+            if (cc == 0x03) {
+              v = juce::jmin(v, 105);
+              mParams[kSysExToParam[cc]]->setValueNotifyingHost(v / 105.f);
+            } else
+              mParams[kSysExToParam[cc]]->setValueNotifyingHost(v / 127.f);
+          }
           decodeSwitches1(p[16]);
           decodeSwitches2(p[17]);
           // J106 has no sub switch; infer from sub level (cc 0x0F)
@@ -1426,7 +1469,11 @@ void KR106AudioProcessor::setCurrentProgram(int index)
   for (int i = 0; i < kNumParams; i++)
   {
     if (isLivePerformanceParam(i)) continue;
-    mParams[i]->setValueNotifyingHost(mParams[i]->convertTo0to1(values[i]));
+    float v = values[i];
+    // PWM: preset stores byte/127; J106 param space is byte/105
+    if (i == kDcoPwm && mDSP.mSynthModel == kr106::kJ106)
+      v = juce::jmin(1.f, v * (127.f / 105.f));
+    mParams[i]->setValueNotifyingHost(mParams[i]->convertTo0to1(v));
   }
 
   mSendPresetSysEx.store(true, std::memory_order_release);
@@ -1451,6 +1498,12 @@ void KR106AudioProcessor::saveCurrentPresetToCSV(const juce::String& name)
 {
   int abs = absPresetIndex();
   mPresetMgr.captureCurrentParams(abs, name, mParams, kNumParams);
+  // PWM: J106 param space is byte/105; convert back to byte/127 for storage
+  if (mDSP.mSynthModel == kr106::kJ106) {
+    std::lock_guard<std::mutex> lock(mPresetMgr.mMutex);
+    if (abs >= 0 && abs < (int)mPresetMgr.mPresets.size())
+      mPresetMgr.mPresets[abs].values[kDcoPwm] *= (105.f / 127.f);
+  }
   mPresetMgr.saveOnePreset(abs, mPresetMgr.getActiveCSVPath(), mParams, kNumParams, sExcludeMask);
 }
 
@@ -1490,6 +1543,9 @@ bool KR106AudioProcessor::isCurrentPresetDirty() const
     if (isLivePerformanceParam(i)) continue;
     float stored = (i < (int)preset.values.size()) ? preset.values[i] : 0.f;
     float current = mParams[i]->convertFrom0to1(mParams[i]->getValue());
+    // PWM: J106 param space is byte/105; stored is byte/127
+    if (i == kDcoPwm && mDSP.mSynthModel == kr106::kJ106)
+      current *= (105.f / 127.f);
     if (std::abs(current - stored) > 1e-4f)
       return true;
   }

@@ -208,7 +208,7 @@ public:
     // Pre-fill with formatted value (includes units + bracket)
     juce::String displayText = mParam->getCurrentValueAsText();
     mEditor->setText(displayText, false);
-    mEditOrigMidi = juce::roundToInt(mParam->getValue() * 127.f);
+
 
     // Position below slider, sized to fit text (like tooltip)
     auto srcBounds = parent->getLocalArea(getParentComponent(), getBounds());
@@ -243,23 +243,9 @@ private:
     juce::String raw = mEditor->getText().trim();
     if (raw.isEmpty()) { dismissEdit(); return; }
 
-    // Check if user edited the bracket value or the human-readable part.
-    // If bracket [N] changed from original, use it; otherwise parse the text.
-    float normalized;
-    int bStart = raw.indexOfChar('[');
-    int bEnd   = raw.indexOfChar(']');
-    if (bStart >= 0 && bEnd > bStart)
-    {
-      int midi = raw.substring(bStart + 1, bEnd).getIntValue();
-      if (midi != mEditOrigMidi)
-        normalized = juce::jlimit(0.f, 1.f, midi / 127.f);
-      else
-        normalized = juce::jlimit(0.f, 1.f, mParam->getValueForText(raw));
-    }
-    else
-    {
-      normalized = juce::jlimit(0.f, 1.f, mParam->getValueForText(raw));
-    }
+    // Parse via the parameter's own valueFromString (handles bracket [N]
+    // with the correct per-param byte range, e.g. PWM uses 0-105 on J106).
+    float normalized = juce::jlimit(0.f, 1.f, mParam->getValueForText(raw));
     mParam->beginChangeGesture();
     mParam->setValueNotifyingHost(normalized);
     mParam->endChangeGesture();
@@ -340,7 +326,6 @@ private:
   KR106Tooltip* mTooltip = nullptr;
   juce::Image mHandleImg;
   std::unique_ptr<juce::TextEditor> mEditor;
-  int mEditOrigMidi = 0;
   float mAccumVal = 0.f;
   float mLastRawDY = 0.f;
   bool mDragging = false;
