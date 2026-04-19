@@ -924,6 +924,18 @@ private:
       if (mArp.mLastNote >= 0) { SendToSynth(mArp.mLastNote, false, 0); mArp.mLastNote = -1; }
       mArp.mHeldNotes.clear();
     }
+    // Safety net: release any voices still sounding that aren't keyed down.
+    // This catches cases where mHeldNotes was cleared (e.g. by preset change)
+    // while Hold was on, leaving orphaned voices with no tracking.
+    int nv = static_cast<int>(NVoices());
+    for (int i = 0; i < nv; i++)
+    {
+      if (mVoiceNote[i] >= 0 && !mKeysDown.test(mVoiceNote[i]))
+      {
+        mVoices[i]->Release();
+        mVoiceNote[i] = -1;
+      }
+    }
   }
 };
 

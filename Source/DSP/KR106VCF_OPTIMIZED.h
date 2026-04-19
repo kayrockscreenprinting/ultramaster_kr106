@@ -5,14 +5,26 @@
 #include <cstring>
 #include <cstdint>
 
-// BA662 feedback architecture: the hardware attenuates the LP4 output
-// 67:1 (R3 100K / R1 1.5K) before the differential pair tanh, placing
-// the tanh argument at ~0.26 during self-oscillation — barely nonlinear.
-// A memoryless scaled tanh on the feedback path (kFbScale, g1-dependent)
-// replaces the previous envelope-based amplitude control. Harmonic purity
-// (H3 ≈ -48 dB), flat amplitude across frequency and resonance, and pitch
-// accuracy all fall out of the weak-drive physics rather than requiring
-// per-parameter tuning.
+// BA662 feedback architecture — circuit-accurate OTA model.
+//
+// Hardware signal path (from Juno-106 schematic):
+//   OscMix ──10K──→ Filter Input Node ←── OTA Output (current)
+//   OscMix ──47K──→ OTA +IN ──1.5K──→ GND
+//   FilterOut─100K──→ OTA -IN ──1.5K──→ GND
+//
+// The input and filter output BOTH enter the BA662 OTA differential
+// pair. Input is attenuated 1.5/(47+1.5) = 0.0309, feedback is
+// attenuated 1.5/(100+1.5) = 0.0148. Input is 2.09× less attenuated
+// than feedback. The OTA output current (proportional to Gm × tanh
+// of the differential) sums with the direct input current (OscMix/10K)
+// at the filter input node.
+//
+// This topology means resonance naturally boosts the input signal
+// because the OTA amplifies the differential which includes the input
+// on +IN. At high cutoff where FilterOut ≈ Input, the differential
+// approaches zero and the OTA contribution vanishes — the passband
+// returns to its uncompensated level without any explicit frequency-
+// dependent correction.
 //
 // ============================================================
 // ARCHITECTURE (post-refactor, April 2026)
@@ -35,10 +47,10 @@
 // OPTIMIZATION NOTES
 // ============================================================
 // Control-rate computation (tanf, expf via ResK, powf via kFbScale,
-// SoftClipK, InputComp, g1/G powers, 1/(1+kG)) is hoisted
-// into UpdateCoeffs() and cached on (frq, res, j106). Held notes pay
-// nothing; modulated cutoff/res hits libm transcendentals once per
-// base-rate sample, not once per oversampled sample.
+// g1/G powers, 1/(1+kG)) is hoisted into UpdateCoeffs() and cached
+// on (frq, res, j106). Held notes pay nothing; modulated cutoff/res
+// hits libm transcendentals once per base-rate sample, not once per
+// oversampled sample.
 //
 // Per-sample denormal flushing replaced with a 1e-20f DC bias on
 // mS[0]. FTZ-independent — works under WASM where there is no FTZ
@@ -65,9 +77,6 @@ struct VCF
   float mEnvDecay = 0.999f;         // per-base-sample decay (22 ms time constant)
   float mSampleRate = 44100.f;      // BASE sample rate
 
-  // Oversample factor (1, 2, or 4). Determines how frq is scaled
-  // for the tan() coefficient and noise seeding. Caller is responsible
-  // for driving ProcessSample at this rate.
   int mOversample = 4;
   float mOverScale = 0.25f;  // 1.0 / mOversample
 
@@ -79,26 +88,21 @@ struct VCF
   }
 
   // ----- control-rate cache -----
-  // Cached on (frq, res, j106) so held notes skip the entire
-  // UpdateCoeffs() preamble.
   float mCacheFrq = -1.f;
   float mCacheRes = -1.f;
   bool  mCacheJ106 = false;
   float mCacheK = 0.f;
   float mCacheG = 0.f;
+  float mCacheFbUltrasonic = 1.f;
 
   // ----- per-UpdateCoeffs() derived coefficients -----
-  // Everything ProcessSample needs in its inner loop. Recomputed at
-  // control rate (i.e. once per base sample or less, if nothing moved).
   struct Coeffs
   {
     float k;
     float g, g1, g1_2, g1_3, G;
     float invDen;        // 1 / (1 + k*G)
-    float comp;          // InputComp(k)
     float kFbScale;
     float invKFbScale;
-    float hfFade;        // describing function HF rolloff
     float noiseLevel;    // adaptive thermal noise (control-rate)
     float otaScale;      // per-stage OTA drive (constant kOTAScaleBase)
     float dfCoeff;       // describing function sensitivity
@@ -118,17 +122,11 @@ struct VCF
   void SetSampleRate(float sampleRate)
   {
     mSampleRate = sampleRate;
-    // Per base-rate sample (22 ms time constant). mInputEnv is updated
-    // in UpdateCoeffs (control rate), so its decay is at base rate.
     mEnvDecay = expf(-1.f / (0.022f * sampleRate));
     InvalidateCache();
   }
 
   // OTA differential-pair tanh (Padé approximant of tanh(x)).
-  // Used in two places: (1) per-stage IR3109 OTA saturation in NLStage,
-  // scaled by kOTAScaleBase, and (2) the BA662 feedback path, scaled by
-  // kFbScale to model the R3(100K)/R1(1.5K) voltage divider that
-  // attenuates the LP4 output before the BA662 differential pair.
   static float OTASat(float x)
   {
     if (x > 3.f) return 1.f;
@@ -156,18 +154,33 @@ struct VCF
     return kNorm * (expf(kShape * res) - 1.f);
   }
 
+  // Resonance slider → feedback gain k for J106.
+  // Quartic polynomial fitted to hardware resonance sweep data
+  // (res_calibrate, April 2026). Noise through VCF at fixed cutoff
+  // (byte 64, ~800 Hz), peak-relative-to-passband measured at 29
+  // resonance steps via Welch PSD. Peak growth curve inverted through
+  // the DSP's own transfer function to recover k values that produce
+  // the measured peak heights.
+  //
+  // Polynomial reaches k=3.42 at R=127. A quadratic knee above fader
+  // position 5.5 adds up to 0.35 to match the hardware curve's steep
+  // onset. A targeted boost above fader position 9 pushes k past 4.0
+  // for self-oscillation onset.
   static float ResK_J106(float res)
   {
     float r = res;
     float r2 = r * r;
     float r3 = r2 * r;
     float r4 = r2 * r2;
-    float k = 4.7116f * r - 6.5743f * r2 + 13.4633f * r3 - 8.2197f * r4;
-    
-    // Targeted boost: ramp from 1.0× at r=0.898 to 1.24× at r=1.0.
-    // Below r=0.898 (~R=114, fader position 9), peaks match hardware.
-    // Above that, k needs to reach 4.0+ for self-oscillation onset.
-    float boost = std::max(0.f, (r - 0.898f) * (0.24f / 0.102f));
+    float k = 4.6265f * r + 4.3866f * r2 - 8.9869f * r3 + 3.3902f * r4;
+
+    if (r > 0.7f)
+    {
+      float knee = (r - 0.7f) / 0.3f;
+      k += std::min(knee * knee * 1.2f, 0.35f);
+    }
+
+    float boost = std::max(0.f, (r - 0.898f) * (0.17f / 0.102f));
     return k * (1.f + boost);
   }
 
@@ -182,12 +195,24 @@ struct VCF
     return std::min(k, 6.6f);
   }
 
-  // Input Q compensation: BA662 differential topology feeds input through
-  // R5(47K) alongside LP4 feedback on R3(100K). Higher resonance boosts
-  // the input, counteracting passband volume drop.
-  static float InputComp(float k) { return (0.142f + 0.065f * k); }
-
   static constexpr float kOTAScaleBase = 0.35f;
+
+  // Circuit-derived constants for the BA662 OTA feedback path.
+  //
+  // Direct input gain (OscMix through 10K to filter input node):
+  // Sets the passband level at R=0. Output gain (8.59) is calibrated
+  // so that kDirectGain × 8.59 = 1.22 (passband near unity).
+  static constexpr float kDirectGain = 0.142f;
+
+  // Input/feedback ratio in the BA662 OTA differential pair.
+  // Hardware: +IN attenuated 1.5/(47+1.5) = 0.0309,
+  //           -IN attenuated 1.5/(100+1.5) = 0.0148,
+  //           ratio = 2.09.
+  // In DSP-normalized signal levels this maps to 0.065 — confirmed
+  // by matching the old InputComp(k) = 0.142 + 0.065×k slope:
+  //   linearized input gain = kDirectGain + k × kInputRatio
+  //                         = 0.142 + 0.065×k  ✓
+  static constexpr float kInputRatio = 0.065f;
 
   // Nonlinear one-pole OTA-C stage: solves y = s + g*tanh(x - y)
   // via one Newton-Raphson iteration from the linear TPT estimate.
@@ -207,61 +232,59 @@ struct VCF
   // ============================================================
   // Control-rate coefficient update.
   // ============================================================
-  // Call once per base-rate sample (or whenever frq/res change).
-  // Recomputes all transcendentals from frq/res and writes mC.
-  //
-  // frq: normalized cutoff at the BASE sample rate [0, ~0.95].
-  //      1.0 == base-rate Nyquist.
-  // res: resonance amount [0, 1]
   void UpdateCoeffs(float frq, float res)
   {
-    // Compute cutoff Hz before clamping frq (needed for hzFade below)
+    // Compute cutoff Hz from unclamped frq (needed for fbUltrasonic).
     float cutoffHz = frq * mSampleRate * 0.5f;
-    frq = std::min(frq, 0.95f);
+    float frqUnclamped = frq;
 
-    // ---- Cache the parameter-derived terms ----
-    // tanf and expf (in ResK) only re-fire when frq, res, or
-    // J106 mode actually changes.
-    if (frq != mCacheFrq || res != mCacheRes || mJ106Res != mCacheJ106)
+    if (frqUnclamped != mCacheFrq || res != mCacheRes || mJ106Res != mCacheJ106)
     {
-      mCacheFrq  = frq;
+      mCacheFrq  = frqUnclamped;
       mCacheRes  = res;
       mCacheJ106 = mJ106Res;
 
       float k = mJ106Res ? ResK_J106(res) : ResK_J6(res);
-      if (!mJ106Res) k = SoftClipK(k); // J106 quartic already saturates
+      if (!mJ106Res) k = SoftClipK(k);
 
-      // Tame resonance at ultrasonic cutoff. The peak itself is inaudible
-      // but its skirt aliases back into the audible range.
-      // Fade resonance from 80% to 95% of the effective Nyquist
-      float os = static_cast<float>(mOversample);
-      float frqFadeStart = os * 0.8f;
-      float frqFadeEnd   = os * 0.95f;
-
-      if (frq > frqFadeStart)
+      // ---- Self-oscillation fade at high cutoff ----
+      // Hardware measurement (osc_calibrate): self-osc amplitude is
+      // flat (±0.4 dB) from byte 25 (~50 Hz) to byte 89 (~4 kHz),
+      // drops 0.7 dB by byte 102 (~11 kHz), 2.8 dB by byte 114
+      // (~32 kHz), and is gone at byte 127 (~40+ kHz).
+      //
+      // Increasing feedback saturation above the fade threshold
+      // reduces the self-osc equilibrium amplitude without changing
+      // k (passband is preserved). The fade threshold scales with
+      // base sample rate so that self-oscillation is also killed
+      // before it can alias through the decimation chain at lower
+      // sample rates.
+      float fbUltrasonic = 1.f;
+      float fadeStart = mSampleRate * 0.35f;  // ~70% of base Nyquist
+      float fadeEnd   = mSampleRate * 0.45f;  // ~90% of base Nyquist
+      if (cutoffHz > fadeStart)
       {
-        float fade = std::max(1.f - (frq - frqFadeStart) / (frqFadeEnd - frqFadeStart), 0.f);
+        float t = std::clamp((cutoffHz - fadeStart) / (fadeEnd - fadeStart), 0.f, 1.f);
+        fbUltrasonic = 1.f + 40.f * t;
+      }
+
+      // ---- Anti-aliasing at 1× OS ----
+      // At 1×, no decimator to attenuate near-Nyquist resonant peaks.
+      // Fade k directly so even broad (non-self-oscillating) peaks
+      // don't alias. At 2×/4× the decimators handle this.
+      if (mOversample == 1 && frq > 0.7f)
+      {
+        float fade = std::max(1.f - (frq - 0.7f) / 0.2f, 0.f);
         k *= fade;
       }
 
-      // Hardware self-oscillation fades above ~30 kHz due to OTA bandwidth.
-      // (From osc_calibrate: HW self-osc drops 3 dB at byte 114 (~32 kHz),
-      //  gone at byte 127.)
-      // cutoffHz is computed from the unclamped frq (before the 0.95 clamp)
-      // so the fade works correctly at all sample rates.
-      float hzFade = 1.f - std::clamp((cutoffHz - 25000.f) / 10000.f, 0.f, 1.f);
-      k *= hzFade;
-
       mCacheK = k;
+      mCacheFbUltrasonic = fbUltrasonic;
 
-      // tanf argument clamped to 0.85 to stay away from Nyquist.
-      // frqOver is frq normalized to the oversampled rate's Nyquist.
       float frqOver = std::min(frq * mOverScale, 0.85f);
-
       mCacheG = tanf(frqOver * static_cast<float>(M_PI) * 0.5f);
     }
 
-    // ---- Cheap per-block derivations from cached k, g ----
     const float k    = mCacheK;
     const float g    = mCacheG;
     const float g1   = g / (1.f + g);
@@ -275,33 +298,23 @@ struct VCF
     mC.g1_2 = g1_2;
     mC.g1_3 = g1_3;
     mC.G    = G;
-    mC.invDen      = 1.f / (1.f + k * G);
-    mC.comp        = InputComp(k);
+    mC.invDen = 1.f / (1.f + k / mCacheFbUltrasonic * G);
 
-    // Describing function pitch compensation coefficient.
-    mC.dfCoeff     = 0.6f;
-
+    mC.dfCoeff  = 0.6f;
     mC.otaScale = kOTAScaleBase;
 
     // Feedback saturation: base drive from resonance (k), plus a
     // g1-dependent term that flattens self-oscillation amplitude
-    // across cutoff frequency. At higher cutoff, the cascade's
-    // through-gain increases; stronger feedback compression keeps
-    // the self-osc level flat (matched to hardware within ±0.7 dB).
+    // across cutoff frequency. The g1 correction is gated by kScale
+    // so it only activates above k=3.0 (near self-osc threshold).
     static constexpr float kFbg1Scale = 14.8f;
     static constexpr float kFbg1Power = 0.79f;
     float baseFbScale = 4.20f * std::clamp((k - 2.5f) * 1.0f, 0.3f, 1.f);
-    mC.kFbScale = baseFbScale + kFbg1Scale * powf(g1, kFbg1Power);
+    float kScale = std::clamp((k - 3.0f) / 1.0f, 0.f, 1.f);
+    mC.kFbScale = (baseFbScale + kScale * kFbg1Scale * powf(g1, kFbg1Power)) * mCacheFbUltrasonic;
     mC.invKFbScale = 1.f / mC.kFbScale;
 
-    {
-      float frqEq = std::min(frq * mOverScale, 0.85f);
-      mC.hfFade = std::clamp((0.12f - frqEq) * 25.f, 0.f, 1.f);
-    }
-
     // Adaptive noise level — control rate.
-    // Decays at base-rate; its only role is seeding self-oscillation
-    // startup, so control-rate update is inaudibly identical to per-sample.
     {
       float stateEnergy = fabsf(mS[0]) + fabsf(mS[1]) + fabsf(mS[2]) + fabsf(mS[3]);
       float energy = std::max(mInputEnv, stateEnergy);
@@ -309,25 +322,14 @@ struct VCF
     }
   }
 
-  // Update the envelope follower with the latest input magnitude.
-  // Separate from UpdateCoeffs so the caller can drive it however
-  // it wants (e.g. with the osc output at base rate). No-op impact
-  // if called inside the oversampled inner loop too — just slightly faster
-  // tracking, which is harmless.
   void TrackInputEnv(float input)
   {
     mInputEnv = std::max(fabsf(input), mInputEnv * mEnvDecay);
   }
 
   // ============================================================
-  // Audio-rate inner sample. Call os× per base sample, using
-  // coefficients from the most recent UpdateCoeffs().
+  // Audio-rate inner sample.
   // ============================================================
-  // The assembly survey showed clang was leaving this out-of-line —
-  // 5 bl-branches per base sample per voice (1 osc + 4 vcf), plus lost
-  // opportunities to hoist mC loads across the 4 consecutive calls and
-  // to schedule instructions across the call boundary. Forcing inline
-  // reclaimed ~2–4% CPU in microbenchmarks on Apple Silicon.
 #if defined(_MSC_VER)
   __forceinline
 #else
@@ -335,34 +337,42 @@ struct VCF
 #endif
   float ProcessSample(float input)
   {
-    // Fast white noise via bit-trick float conversion.
-    // Builds a float in [2,4) by stuffing PRNG bits into the mantissa,
-    // then subtracts 3 to get [-1,1).
     mNoiseSeed = mNoiseSeed * 196314165u + 907633515u;
     union { uint32_t u; float f; } n;
     n.u = (mNoiseSeed >> 9) | 0x40000000u;
     float white = n.f - 3.f;
     input += white * mC.noiseLevel;
 
-    // FTZ-independent denormal prevention: a tiny DC bias on one
-    // integrator state keeps the cascade out of the denormal range.
-    // Critical for the WASM build (no FTZ flag), harmless on native.
     mS[0] += 1e-20f;
 
     // Linear cascade predictor: exact for linear stages.
     float S = mS[0] * mC.g1_3 + mS[1] * mC.g1_2 + mS[2] * mC.g1 + mS[3];
 
-    // BA662 feedback path: weakly-driven scaled tanh.
-    float fbSig = OTASat(S * mC.kFbScale) * mC.invKFbScale;
+    // Circuit-accurate BA662 OTA: input and feedback share the
+    // differential pair. The OTA sees:
+    //   +IN: input × 1.5/(47+1.5)   (attenuated oscillator mix)
+    //   -IN: FilterOut × 1.5/(100+1.5)  (attenuated filter output)
+    // In DSP-normalized units, input enters at kInputRatio (0.065)
+    // relative to the feedback signal S.
+    //
+    // Key behaviors that fall out of this topology:
+    //   • Self-oscillation (input=0): otaDiff = -S, identical to
+    //     feedback-only model. Self-osc unchanged.
+    //   • Low cutoff (S≈0): otaDiff ≈ input×0.065, OTA boosts input
+    //     proportionally to k. Natural passband compensation.
+    //   • High cutoff (S≈input×gain): differential partially cancels,
+    //     OTA contribution shrinks. Passband returns to uncompensated
+    //     level — no explicit frequency-dependent correction needed.
+    float otaDiff = input * kInputRatio - S;
+    float otaOut = OTASat(otaDiff * mC.kFbScale) * mC.invKFbScale;
 
-    float u = (input * mC.comp - mC.k * fbSig) * mC.invDen;
+    // Filter input = direct path (10K) + resonance-controlled OTA output.
+    float u = (input * kDirectGain + mC.k * otaOut) * mC.invDen;
 
     // Per-stage describing function pitch compensation.
     float stateAmp = fabsf(mS[3]);
     float dfGain = 1.f / sqrtf(1.f + mC.dfCoeff * stateAmp * stateAmp);
     dfGain = std::max(dfGain, 0.65f);
-    // hfFade prevents aliasing feedback near Nyquist.
-    dfGain = 1.f - mC.hfFade * (1.f - dfGain);
     float g1NL = std::min(mC.g1 / dfGain, 0.98f);
     float gNL  = g1NL / (1.f - g1NL);
 
@@ -372,15 +382,11 @@ struct VCF
     float lp3 = NLStage(mS[2], lp2, gNL, g1NL, ota);
     float lp4 = NLStage(mS[3], lp3, gNL, g1NL, ota);
 
-    // Output gain: passband makeup gain for the 4-pole
-    // cascade at the calibrated InputComp level.
+    // Output gain: passband makeup gain for the 4-pole cascade.
+    // kDirectGain × 8.59 = 1.22 (passband near unity at R=0).
     return lp4 * 8.59f;
   }
 
-  // Convenience wrapper: run one base-rate sample through a single
-  // ProcessSample (no oversampling). Only useful for priming /
-  // diagnostics — normal use is to call UpdateCoeffs once then
-  // ProcessSample os× from the voice's inner loop.
   float Process(float input, float frq, float res)
   {
     UpdateCoeffs(frq, res);

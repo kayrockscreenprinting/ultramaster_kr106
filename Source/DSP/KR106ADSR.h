@@ -209,7 +209,10 @@ struct ADSR
   void SetSustain(float s)
   {
     mSustain = s;
-    mSusInt = static_cast<uint16_t>(s * kEnvMax);
+    // ROM stores sustain via store16Bit (<<7), ceiling 0x3F80.
+    // Envelope peaks at 0x3FFF, so full sustain still triggers one
+    // decay tick ($3FFF > $3F80) before snapping — matches hardware.
+    mSusInt = static_cast<uint16_t>(s * 0x3F80);
   }
 
   // --- Display helpers (slider 0-1 -> ms, for tooltips and scope) ---

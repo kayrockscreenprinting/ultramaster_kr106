@@ -886,7 +886,7 @@ public:
           // PWM uses raw LFO directly, not onset-enveloped.
           // ROM $0761-$0788: lfoVal used unconditionally, onset envelope
           // ($FF5A) only gates pitch/VCF depth scalars, not PWM path.
-          pw = mDcoPwm * (lfoRaw + 1.f) * 0.5f;
+          pw = mDcoPwm * (1.f - lfoRaw) * 0.5f;
           break; // LFO
         case 0:
           pw = mDcoPwm;

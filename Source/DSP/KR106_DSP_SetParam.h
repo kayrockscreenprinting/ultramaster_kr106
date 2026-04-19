@@ -38,6 +38,8 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
       break;
     }
     case kDcoPwm:
+      // J106 param 0-1 = byte 0-105 (R5/R6 limit); duty cycle range
+      // (pwMin..pwMax = 50%..95%) is already modeled in the voice.
       ForEachVoice([value](kr106::Voice<T>& v) { v.mDcoPwm = static_cast<float>(value); });
       break;
     case kDcoSub: {
