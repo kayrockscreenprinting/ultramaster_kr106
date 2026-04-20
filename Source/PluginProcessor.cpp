@@ -1095,7 +1095,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
       apr[4] = static_cast<uint8_t>(mCurrentPreset & 0x7F);
 
       for (int cc = 0; cc < 16; cc++)
-        apr[5 + cc] = static_cast<uint8_t>(juce::roundToInt(getParamValue(kSysExToParam[cc]) * 127.f));
+        apr[5 + cc] = static_cast<uint8_t>(juce::roundToInt(getParamValue(kSysExToParam[cc]) * ((cc == 0x03) ? 105.f : 127.f)));
 
       {
         int oct = juce::roundToInt(getParamValue(kOctTranspose));

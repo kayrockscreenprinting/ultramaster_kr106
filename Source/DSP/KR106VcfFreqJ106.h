@@ -247,21 +247,22 @@ inline uint16_t calc_vcf_bend_amt(
  */
 inline float dacToHz(uint16_t dac)
 {
-  static constexpr float kBaseFreq = 5.53f;
-  static constexpr float kScale = 0.693147f / 1143.f;
-  float f = kBaseFreq * expf(static_cast<float>(dac) * kScale);
+  // Calibration anchor: f(DAC=6272, freq_byte=49) = 248 Hz.
+  // Slope and ceiling fitted to hardware self-oscillation sweep
+  // on reference unit (SN#193284). kBaseFreq derived from anchor:
+  //   kBaseFreq = 248 / exp(6272 * kScale)
+  // Residuals across the full 46-point sweep: RMS ~30 cents,
+  // max ~75 cents at F=127. Zero at the anchor by construction.
+  //
+  // Note: this unit's physical IR3109 chain tracks at ~1166 DAC/oct,
+  // slightly flatter than the ROM's 1143 DAC/oct firmware intent.
+  // We match physical behavior, not firmware intent.
+  static constexpr float kBaseFreq = 5.9568f;
+  static constexpr float kScale    = 0.693147f / 1165.87f;
+  static constexpr float kCeil     = 48255.f;
 
-  // IR3109 expo converter saturation: at high bias currents the
-  // transistor emitter resistance compresses the exponential,
-  // limiting the practical range to ~50 kHz (service manual spec).
-  // Below 20 kHz: pure exponential (identity).
-  // Above 20 kHz: tanh compression to 50 kHz ceiling.
-  // C1 continuous (slope = 1 at threshold) for smooth sweeps.
-  static constexpr float kThresh = 20000.f;
-  static constexpr float kCeil   = 50000.f;
-  static constexpr float kRange  = kCeil - kThresh;
-  if (f <= kThresh) return f;
-  return kThresh + kRange * tanhf((f - kThresh) / kRange);
+  float f = kBaseFreq * expf(static_cast<float>(dac) * kScale);
+  return kCeil * tanhf(f / kCeil);
 }
 
 } // namespace kr106
