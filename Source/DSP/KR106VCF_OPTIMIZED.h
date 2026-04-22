@@ -93,7 +93,6 @@ struct VCF
   bool  mCacheJ106 = false;
   float mCacheK = 0.f;
   float mCacheG = 0.f;
-  float mCacheFbUltrasonic = 1.f;
 
   // ----- per-UpdateCoeffs() derived coefficients -----
   struct Coeffs
@@ -125,7 +124,7 @@ struct VCF
     mEnvDecay = expf(-1.f / (0.022f * sampleRate));
     InvalidateCache();
   }
-
+  
   // OTA differential-pair tanh (Padé approximant of tanh(x)).
   static float OTASat(float x)
   {
@@ -234,39 +233,16 @@ struct VCF
   // ============================================================
   void UpdateCoeffs(float frq, float res)
   {
-    // Compute cutoff Hz from unclamped frq (needed for fbUltrasonic).
-    float cutoffHz = frq * mSampleRate * 0.5f;
     float frqUnclamped = frq;
 
     if (frqUnclamped != mCacheFrq || res != mCacheRes || mJ106Res != mCacheJ106)
     {
-      mCacheFrq  = frqUnclamped;
-      mCacheRes  = res;
+      mCacheFrq = frqUnclamped;
+      mCacheRes = res;
       mCacheJ106 = mJ106Res;
 
       float k = mJ106Res ? ResK_J106(res) : ResK_J6(res);
       if (!mJ106Res) k = SoftClipK(k);
-
-      // ---- Self-oscillation fade at high cutoff ----
-      // Hardware measurement (osc_calibrate): self-osc amplitude is
-      // flat (±0.4 dB) from byte 25 (~50 Hz) to byte 89 (~4 kHz),
-      // drops 0.7 dB by byte 102 (~11 kHz), 2.8 dB by byte 114
-      // (~32 kHz), and is gone at byte 127 (~40+ kHz).
-      //
-      // Increasing feedback saturation above the fade threshold
-      // reduces the self-osc equilibrium amplitude without changing
-      // k (passband is preserved). The fade threshold scales with
-      // base sample rate so that self-oscillation is also killed
-      // before it can alias through the decimation chain at lower
-      // sample rates.
-      float fbUltrasonic = 1.f;
-      float fadeStart = mSampleRate * 0.35f;  // ~70% of base Nyquist
-      float fadeEnd   = mSampleRate * 0.45f;  // ~90% of base Nyquist
-      if (cutoffHz > fadeStart)
-      {
-        float t = std::clamp((cutoffHz - fadeStart) / (fadeEnd - fadeStart), 0.f, 1.f);
-        fbUltrasonic = 1.f + 40.f * t;
-      }
 
       // ---- Anti-aliasing at 1× OS ----
       // At 1×, no decimator to attenuate near-Nyquist resonant peaks.
@@ -279,39 +255,34 @@ struct VCF
       }
 
       mCacheK = k;
-      mCacheFbUltrasonic = fbUltrasonic;
 
       float frqOver = std::min(frq * mOverScale, 0.85f);
       mCacheG = tanf(frqOver * static_cast<float>(M_PI) * 0.5f);
     }
 
-    const float k    = mCacheK;
-    const float g    = mCacheG;
-    const float g1   = g / (1.f + g);
+    const float k = mCacheK; // post-fade effective k
+    const float g = mCacheG;
+    const float g1 = g / (1.f + g);
     const float g1_2 = g1 * g1;
     const float g1_3 = g1_2 * g1;
-    const float G    = g1_2 * g1_2;
+    const float G = g1_2 * g1_2;
 
-    mC.k    = k;
-    mC.g    = g;
-    mC.g1   = g1;
+    mC.k = k;
+    mC.g = g;
+    mC.g1 = g1;
     mC.g1_2 = g1_2;
     mC.g1_3 = g1_3;
-    mC.G    = G;
-    mC.invDen = 1.f / (1.f + k / mCacheFbUltrasonic * G);
+    mC.G = G;
+    mC.invDen = 1.f / (1.f + k * G);
 
-    mC.dfCoeff  = 0.6f;
+    mC.dfCoeff = 0.6f;
     mC.otaScale = kOTAScaleBase;
 
-    // Feedback saturation: base drive from resonance (k), plus a
-    // g1-dependent term that flattens self-oscillation amplitude
-    // across cutoff frequency. The g1 correction is gated by kScale
-    // so it only activates above k=3.0 (near self-osc threshold).
-    static constexpr float kFbg1Scale = 14.8f;
-    static constexpr float kFbg1Power = 0.79f;
+    // Feedback saturation drive. Fit empirically so kFbScale reaches
+    // ~4.2 at/above self-osc threshold (k≥3.5) and collapses to a
+    // floor of 1.26 at k≤2.5 so passband signals stay linear.
     float baseFbScale = 4.20f * std::clamp((k - 2.5f) * 1.0f, 0.3f, 1.f);
-    float kScale = std::clamp((k - 3.0f) / 1.0f, 0.f, 1.f);
-    mC.kFbScale = (baseFbScale + kScale * kFbg1Scale * powf(g1, kFbg1Power)) * mCacheFbUltrasonic;
+    mC.kFbScale = baseFbScale;
     mC.invKFbScale = 1.f / mC.kFbScale;
 
     // Adaptive noise level — control rate.
@@ -345,8 +316,13 @@ struct VCF
 
     mS[0] += 1e-20f;
 
-    // Linear cascade predictor: exact for linear stages.
-    float S = mS[0] * mC.g1_3 + mS[1] * mC.g1_2 + mS[2] * mC.g1 + mS[3];
+    // Linear cascade predictor: y4 when u=0. The (1-g1) factor comes
+    // from the last stage's output = g1·input_prev + (1-g1)·s_last,
+    // and propagates through to all state contributions. Missing this
+    // factor doubles effective k at g1=0.5 (cutoff near Fs/4), which
+    // was causing the filter to self-oscillate at much lower nominal
+    // k than it should.
+    float S = (1.f - mC.g1) * (mS[0] * mC.g1_3 + mS[1] * mC.g1_2 + mS[2] * mC.g1 + mS[3]);
 
     // Circuit-accurate BA662 OTA: input and feedback share the
     // differential pair. The OTA sees:
@@ -376,11 +352,10 @@ struct VCF
     float g1NL = std::min(mC.g1 / dfGain, 0.98f);
     float gNL  = g1NL / (1.f - g1NL);
 
-    float ota = mC.otaScale;
-    float lp1 = NLStage(mS[0], u,   gNL, g1NL, ota);
-    float lp2 = NLStage(mS[1], lp1, gNL, g1NL, ota);
-    float lp3 = NLStage(mS[2], lp2, gNL, g1NL, ota);
-    float lp4 = NLStage(mS[3], lp3, gNL, g1NL, ota);
+    float lp1 = NLStage(mS[0], u,   gNL, g1NL, mC.otaScale);
+    float lp2 = NLStage(mS[1], lp1, gNL, g1NL, mC.otaScale);
+    float lp3 = NLStage(mS[2], lp2, gNL, g1NL, mC.otaScale);
+    float lp4 = NLStage(mS[3], lp3, gNL, g1NL, mC.otaScale);
 
     // Output gain: passband makeup gain for the 4-pole cascade.
     // kDirectGain × 8.59 = 1.22 (passband near unity at R=0).

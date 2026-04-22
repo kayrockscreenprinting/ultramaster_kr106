@@ -217,16 +217,25 @@ void KR106DSP<T>::SetParam(int paramIdx, double value)
         v.mADSR.mModel = mSynthModel;
         v.mVCF.mJ106Res = (mSynthModel == kr106::kJ106);
         v.mOsc.mPulseInvert = (mSynthModel == kr106::kJ106);
+        v.mOscBLEP.mPulseInvert = (mSynthModel == kr106::kJ106);
         if (mSynthModel == kr106::kJ106) {
           v.mOsc.mSawAmp   = kr106::kSawAmpJ106;
           v.mOsc.mPulseAmp = kr106::kPulseAmpJ106;
           v.mOsc.mSubAmp   = kr106::kSubAmpJ106;
           v.mOsc.mNoiseAmp = kr106::kNoiseAmpJ106;
+          v.mOscBLEP.mSawAmp   = kr106::kSawAmpJ106;
+          v.mOscBLEP.mPulseAmp = kr106::kPulseAmpJ106;
+          v.mOscBLEP.mSubAmp   = kr106::kSubAmpJ106;
+          v.mOscBLEP.mNoiseAmp = kr106::kNoiseAmpJ106;
         } else {
           v.mOsc.mSawAmp   = kr106::kSawAmpJ6;
           v.mOsc.mPulseAmp = kr106::kPulseAmpJ6;
           v.mOsc.mSubAmp   = kr106::kSubAmpJ6;
           v.mOsc.mNoiseAmp = kr106::kNoiseAmpJ6;
+          v.mOscBLEP.mSawAmp   = kr106::kSawAmpJ6;
+          v.mOscBLEP.mPulseAmp = kr106::kPulseAmpJ6;
+          v.mOscBLEP.mSubAmp   = kr106::kSubAmpJ6;
+          v.mOscBLEP.mNoiseAmp = kr106::kNoiseAmpJ6;
         }
       });
       mLFO.mModel = mSynthModel;

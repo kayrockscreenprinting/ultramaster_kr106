@@ -247,22 +247,24 @@ inline uint16_t calc_vcf_bend_amt(
  */
 inline float dacToHz(uint16_t dac)
 {
-  // Calibration anchor: f(DAC=6272, freq_byte=49) = 248 Hz.
-  // Slope and ceiling fitted to hardware self-oscillation sweep
-  // on reference unit (SN#193284). kBaseFreq derived from anchor:
-  //   kBaseFreq = 248 / exp(6272 * kScale)
-  // Residuals across the full 46-point sweep: RMS ~30 cents,
-  // max ~75 cents at F=127. Zero at the anchor by construction.
+  // Hardware-fitted model, SN#193284. Anchor f(6272)=248 Hz preserved.
+  // RMS residual 13 cents, max 33 cents across full 0..16256 DAC range.
   //
-  // Note: this unit's physical IR3109 chain tracks at ~1166 DAC/oct,
-  // slightly flatter than the ROM's 1143 DAC/oct firmware intent.
-  // We match physical behavior, not firmware intent.
-  static constexpr float kBaseFreq = 5.9568f;
-  static constexpr float kScale    = 0.693147f / 1165.87f;
-  static constexpr float kCeil     = 48255.f;
+  // Structure:
+  //   1. Low-current floor term captures expo-converter leakage/offset
+  //   2. Exponential core: physical expo converter in its linear regime
+  //   3. Soft-knee power saturation: OTA/downstream compression toward
+  //      a real ceiling, softer approach than tanh (empirically n~1.79)
+  static constexpr float kFloor    = 0.853f;
+  static constexpr float kBaseFreq = 5.7688f;
+  static constexpr float kScale    = 0.693147f / 1156.98f;
+  static constexpr float kCeil     = 57086.7f;
+  static constexpr float kKneeN    = 1.792f;
+  static constexpr float kInvKneeN = 1.0f / kKneeN;
 
-  float f = kBaseFreq * expf(static_cast<float>(dac) * kScale);
-  return kCeil * tanhf(f / kCeil);
+  float f_un = kFloor + kBaseFreq * expf(static_cast<float>(dac) * kScale);
+  float r    = f_un / kCeil;
+  return f_un / powf(1.0f + powf(r, kKneeN), kInvKneeN);
 }
 
 } // namespace kr106

@@ -570,6 +570,14 @@ public:
       outputs[0][s] *= static_cast<T>(mVcaLevelSmooth);
     }
 
+    // Post-VCA low-pass (uPC1252H2 output pole)
+    for (int s = 0; s < nFrames; s++)
+    {
+      float x = static_cast<float>(outputs[0][s]);
+      mPostVcaLPState += mPostVcaLPCoeff * (x - mPostVcaLPState);
+      outputs[0][s] = static_cast<T>(mPostVcaLPState);
+    }
+
     // Always call Chorus::Process — even when bypassed it keeps the
     // delay lines, filter state, and LFO warm for click-free engagement.
     for (int s = 0; s < nFrames; s++)
@@ -597,6 +605,11 @@ public:
   {
     mSampleRate = static_cast<float>(sampleRate);
     mDacSmoothCoeff = 1.f - expf(-1.f / (0.001f * mSampleRate)); // 1ms RC tau
+
+    // Post-VCA low-pass: models uPC1252H2 VCA output pole.
+    static constexpr float kPostVcaFc = 100000.f;
+    mPostVcaLPCoeff = 1.f - expf(-2.f * static_cast<float>(M_PI) * kPostVcaFc / mSampleRate);
+    mPostVcaLPState = 0.f;
 
     // Saw tables are clocked at the base sample rate — the oscillator
     // runs at 1×, and its output is upsampled per-voice into the 4×
@@ -709,6 +722,8 @@ public:
 
   float mVcaLevel = 1.f;
   float mVcaLevelSmooth = 1.f;
+  float mPostVcaLPState = 0.f;   // one-pole LPF after VCA level, before chorus
+  float mPostVcaLPCoeff = 1.f;   // coefficient (1.0 = bypassed)
   float mDacSmoothCoeff = 0.f;  // 1ms RC filter coefficient (shared by all CV smoothers)
   float mMasterVol = 1.f;
   float mMasterVolSmooth = 1.f;

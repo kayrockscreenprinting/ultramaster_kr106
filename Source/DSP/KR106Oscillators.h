@@ -204,7 +204,7 @@ struct Oscillators {
     // Skipping the whole block when the gain has decayed below kGainEps
     // and pulseOn is false avoids all of that.
     //
-    // Hardware maxes at 95% duty, so clamping effPW to [0.05, 0.95]
+    // Hardware maxes at ~97% duty, clamping effPW to [0.03, 0.97]
     // leaves comfortable headroom for the 4-sample polyBLEP window
     // without a frequency-dependent squeeze. If the two BLEP windows
     // overlap at high notes with narrow PW, the corrections sum
@@ -212,7 +212,7 @@ struct Oscillators {
     if (pulseOn || (mPulseGain > kGainEps)) {
       float effPW = pulseWidth;
       if (mPulseInvert) effPW = 1.f - effPW; // J106: inverted duty cycle
-      effPW = std::clamp(effPW, 0.05f, 0.95f);
+      effPW = std::clamp(effPW, 0.03f, 0.97f);
       float pulse = (mPos < effPW) ? -1.f : 1.f;
       pulse -= blepAtReset;              // falling edge at reset (shared)
       float pw2 = mPos - effPW;

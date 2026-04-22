@@ -157,52 +157,94 @@ struct LFO
   // Maps normalized slider 0..1 to LFO frequency in Hz.
   //
   // The LFO is a triangle accumulator in the D7811G main loop ($074E):
-  //   - 16-bit value in $FF4D, range $0000–$1FFF
+  //   - 16-bit value in $FF4D, range $0000-$1FFF
   //   - Rate coefficient from 0C60_lfoSpeedTbl in $FF4B
-  //   - Rising: DADD EA,BC, clamp at $1FFF, flip direction
-  //   - Falling: DSUBNB EA,BC, clamp at $0000, flip direction
-  //   - Full triangle cycle = 2 × $2000 = 16384 accumulator steps
+  //   - Rising: DADD EA,BC, overflow at >= $2000, clamp to $1FFF, flip direction
+  //   - Falling: DSUBNB EA,BC, underflow < $0000, clamp to $0000, flip direction
+  //   - Each main-loop pass advances the accumulator by one coefficient step
   //
-  // Two-cycle: the LFO alternates rising/falling on successive loop
-  // iterations (like the sub oscillator), so it updates at half the
-  // main loop rate. The 4.2ms loop runs at 238.1 Hz; the LFO's
-  // effective tick rate is ~119 Hz. Measured LFO at MIDI 66:
-  // 4.84 Hz (table coeff 698 → effective rate ≈ 113.6 Hz).
+  // INTEGER STEPPING WITH CLAMPING IS THE DOMINANT EFFECT.
+  // The firmware's LFO is not continuous — it takes integer steps and hard-
+  // clamps on overflow, discarding any excess motion. So the number of main-
+  // loop passes per half-cycle is ceil(8192 / coeff), not 8192/coeff:
+  //   coeff=380:  ceil(8192/380)  = 22 passes/half-cycle  (ideal: 21.56)
+  //   coeff=1800: ceil(8192/1800) =  5 passes/half-cycle  (ideal: 4.55)
+  //   coeff=1960: ceil(8192/1960) =  5 passes/half-cycle  (ideal: 4.18)
+  //   coeff=4096: ceil(8192/4096) =  2 passes/half-cycle  (ideal: 2.00)
+  // At high rates this quantizes the LFO frequency onto a coarse discrete set:
+  // coefficients 1800 and 1960 both produce the same 5-passes-per-half-cycle
+  // rate (confirmed on hardware: B32=11.67 Hz, B85=11.76 Hz, 0.8% difference
+  // is measurement noise over the 20-40 counted cycles).
   //
-  // freq = effective_rate × rate_coeff / 16384
+  // The polarity bit (bit 1 of $FF4A_lfoFlag) toggles at half the rate of the
+  // direction bit, since INRW increments the flag once per direction change.
+  // Polarity determines whether the LFO adds to or subtracts from modulation
+  // targets, so one audible period = 2 full accumulator cycles = 4 half-cycles:
+  //   passes_per_full_LFO_period = 4 * ceil(8192 / coeff)
+  //   freq = 1 / (passes_per_period * kLoopPeriodMs / 1000)
   //
-  // Clean-room piecewise linear approximation of 0C60_lfoSpeedTbl.
-  // Slopes and breakpoints derived from curve analysis of the table
-  // shape: a slow-rate fine-control region (idx 0–7), then linear
-  // 8–63 (slope 10), 64–95 (slope 16), then accelerating 96–127 in
-  // four sub-segments.
+  // Hardware verification (lfrancis unit, 96 kHz capture):
+  //   coeff  HW Hz  Integer model @ 4.27ms  |  Old continuous formula
+  //    380   2.686       2.662 (-0.9%)      |      2.761 (+2.8%)
+  //    698   4.840       4.880 (+0.8%)      |      5.072 (+4.8%)
+  //   1800  11.666      11.710 (+0.4%)      |     13.079 (+12%)
+  //   1960  11.759      11.710 (-0.4%)      |     14.242 (+21%)
   //
-  // The bottom 8 entries are not a single linear ramp — the ROM
-  // values (5, 15, 25, 40, 55, 70, 80, 90) describe a 4-segment
-  // sub-curve with slopes +10, +15, +10. This gives finer LFO-rate
-  // control at the very slowest settings, important for ambient/drone
-  // patches where the LFO is set to many-second cycles.
+  // Byte-exact 0C60_lfoSpeedTbl from D7811G ROM (128 × 16-bit entries).
+  // Linear interpolation between integer indices for smooth slider sweeps.
+  //
+  // Structure of the table:
+  //   idx 0–7:    slow-rate fine control (5,15,25,40,55,70,80,90)
+  //   idx 8–63:   perfectly linear, step=10
+  //   idx 64–95:  perfectly linear, step=16
+  //   idx 96–127: accelerating region with irregular steps
+  //
+  // The bottom 8 entries give finer LFO-rate resolution at the slowest
+  // settings, important for ambient/drone patches with many-second cycles.
+  static constexpr uint16_t kLfoSpeedTbl[128] = {
+    0x0005, 0x000f, 0x0019, 0x0028, 0x0037, 0x0046, 0x0050, 0x005a, // 0c60 (idx 0-7)
+    0x0064, 0x006e, 0x0078, 0x0082, 0x008c, 0x0096, 0x00a0, 0x00aa, // 0c70 (idx 8-15)
+    0x00b4, 0x00be, 0x00c8, 0x00d2, 0x00dc, 0x00e6, 0x00f0, 0x00fa, // 0c80 (idx 16-23)
+    0x0104, 0x010e, 0x0118, 0x0122, 0x012c, 0x0136, 0x0140, 0x014a, // 0c90 (idx 24-31)
+    0x0154, 0x015e, 0x0168, 0x0172, 0x017c, 0x0186, 0x0190, 0x019a, // 0ca0 (idx 32-39)
+    0x01a4, 0x01ae, 0x01b8, 0x01c2, 0x01cc, 0x01d6, 0x01e0, 0x01ea, // 0cb0 (idx 40-47)
+    0x01f4, 0x01fe, 0x0208, 0x0212, 0x021c, 0x0226, 0x0230, 0x023a, // 0cc0 (idx 48-55)
+    0x0244, 0x024e, 0x0258, 0x0262, 0x026c, 0x0276, 0x0280, 0x028a, // 0cd0 (idx 56-63)
+    0x029a, 0x02aa, 0x02ba, 0x02ca, 0x02da, 0x02ea, 0x02fa, 0x030a, // 0ce0 (idx 64-71)
+    0x031a, 0x032a, 0x033a, 0x034a, 0x035a, 0x036a, 0x037a, 0x038a, // 0cf0 (idx 72-79)
+    0x039a, 0x03aa, 0x03ba, 0x03ca, 0x03da, 0x03ea, 0x03fa, 0x040a, // 0d00 (idx 80-87)
+    0x041a, 0x042a, 0x043a, 0x044a, 0x045a, 0x046a, 0x047a, 0x048a, // 0d10 (idx 88-95)
+    0x04be, 0x04f2, 0x0526, 0x055a, 0x058e, 0x05c2, 0x05f6, 0x062c, // 0d20 (idx 96-103)
+    0x0672, 0x06b8, 0x0708, 0x0758, 0x07a8, 0x07f8, 0x085c, 0x08c0, // 0d30 (idx 104-111)
+    0x0924, 0x0988, 0x09ec, 0x0a50, 0x0ab4, 0x0b18, 0x0b7c, 0x0be0, // 0d40 (idx 112-119)
+    0x0c58, 0x0cd0, 0x0d48, 0x0dde, 0x0e74, 0x0f0a, 0x0fa0, 0x1000  // 0d50 (idx 120-127)
+  };
+
   static float lfoSpeedCoeff(float i)
   {
-    // Bottom region: 4-segment match for ROM idx 0–7.
-    if (i < 1.f)   return 5.f  + i * 10.f;
-    if (i < 3.f)   return 15.f + (i - 1.f) * 10.f;  // +10 per step
-    if (i < 6.f)   return 25.f + (i - 2.f) * 15.f;  // +15 per step  (idx 3,4,5 = 40,55,70)
-    if (i < 8.f)   return 70.f + (i - 5.f) * 10.f;  // +10 per step  (idx 6,7 = 80,90)
-    if (i < 64.f)  return 20.f + i * 10.f;               // linear, step=10
-    if (i < 96.f)  return -358.f + i * 16.f;             // linear, step=16
-    if (i < 104.f) return 1214.f + (i - 96.f) * 52.3f;   // accelerating
-    if (i < 112.f) return 1650.f + (i - 104.f) * 84.3f;
-    if (i < 120.f) return 2340.f + (i - 112.f) * 100.f;
-    return 3160.f + (i - 120.f) * 133.7f;                // fastest
+    if (i <= 0.f)   return static_cast<float>(kLfoSpeedTbl[0]);
+    if (i >= 127.f) return static_cast<float>(kLfoSpeedTbl[127]);
+    int idx = static_cast<int>(i);
+    float frac = i - static_cast<float>(idx);
+    float a = static_cast<float>(kLfoSpeedTbl[idx]);
+    float b = static_cast<float>(kLfoSpeedTbl[idx + 1]);
+    return a + frac * (b - a);
   }
 
   static float lfoFreqJ106(float t)
   {
-    // Two-cycle: LFO updates every other main-loop iteration ($074E),
-    // so effective tick rate is half the 238.1 Hz loop rate.
-    float coeff = lfoSpeedCoeff(t * 127.f);
-    return coeff * (kDelayTickRate * 0.5f) / 16384.f;
+    // Integer-stepping model. The firmware advances the accumulator by one
+    // `coeff` per main-loop pass and hard-clamps on overflow — discrete steps,
+    // not continuous arithmetic. Hardware measurements confirm this dominates
+    // the rate relationship, especially at high coefficients.
+    float coeff_f = lfoSpeedCoeff(t * 127.f);
+    int coeff = static_cast<int>(coeff_f + 0.5f);
+    if (coeff < 1) coeff = 1;                                // divide-by-zero guard
+    // Passes per half accumulator sweep = ceil(8192 / coeff)
+    int passesHalf = (8192 + coeff - 1) / coeff;
+    // One audible period = 4 half-sweeps (polarity bit toggles at half rate)
+    int passesFull = 4 * passesHalf;
+    return 1000.f / (static_cast<float>(passesFull) * kLoopPeriodMs);
   }
 
   void SetRate(float slider, float sampleRate)
@@ -221,19 +263,25 @@ struct LFO
 
   // --- Juno-106 LFO delay: two-stage envelope from D7811G firmware ---
   //
-  // Stage 1 — Holdoff: accumulator += attackTable[pot] per tick (238.1 Hz).
+  // Stage 1 - Holdoff: accumulator += attackTable[pot] per main-loop pass.
   //   Completes when accumulator >= 0x4000. LFO depth = 0 during this phase.
   //   Uses the same attack rate table as the ADSR (0B60_envAtkTbl).
   //
-  // Stage 2 — Ramp: accumulator += rampTable[pot>>4] per tick.
+  // Stage 2 - Ramp: accumulator += rampTable[pot>>4] per main-loop pass.
   //   LFO depth = high byte of 16-bit accumulator / 255.
   //   Linear fade-in until 16-bit overflow, then clamp to full depth.
   //   Ramp table (0B30_LfoDelayRampTbl): 8 entries indexed by pot >> 4.
 
-  // LFO delay tick rate: the main loop runs at 238.1 Hz (4.2 ms).
-  // The LFO *oscillator* is two-cycle (half rate), but the delay
-  // holdoff and ramp accumulators run every main loop iteration.
-  static constexpr float kDelayTickRate = 238.1f;
+  // Main-loop period: canonical value lives in ADSR::kLoopPeriodMs. All
+  // firmware-rate modulation (ADSR, LFO delay holdoff/ramp, VCF tick,
+  // portamento) shares the same constant so changes stay coherent.
+  // See ADSR header for measurement history and calibration notes.
+  static constexpr float kLoopPeriodMs = ADSR::kLoopPeriodMs;
+  static constexpr float kLoopTickRate = ADSR::kTickRate;  // ~234.2 Hz
+
+  // Legacy alias kept so external callers (if any) still compile. Prefer
+  // kLoopTickRate in new code.
+  static constexpr float kDelayTickRate = kLoopTickRate;
 
   // Clean-room LFO delay ramp table (0B30_LfoDelayRampTbl).
   // 8 entries, indexed by (pot >> 4). Larger value = faster ramp.
@@ -256,7 +304,7 @@ struct LFO
     if (inc >= ADSR::kEnvMax) return 0.f; // instant
     // ticks to reach 0x4000: accumulator >= 0x4000 after ceil(0x4000/inc) ticks
     float ticks = static_cast<float>(ADSR::kEnvMax) / static_cast<float>(inc);
-    return ticks / kDelayTickRate;
+    return ticks / kLoopTickRate;
   }
 
   // Compute ramp rate (depth per second) for J106 LFO delay.
@@ -269,7 +317,7 @@ struct LFO
     int idx = std::clamp(pot >> 4, 0, 7);
     uint16_t rampInc = kLfoRampTable[idx];
     if (rampInc == 0xFFFF) return 1e6f; // instant
-    return (static_cast<float>(rampInc) / 65536.f) * kDelayTickRate;
+    return (static_cast<float>(rampInc) / 65536.f) * kLoopTickRate;
   }
 
   void SetDelay(float slider)

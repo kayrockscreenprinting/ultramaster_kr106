@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(KR106 VERSION 2.5.10)
+project(KR106 VERSION 2.5.11)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
 

@@ -34,8 +34,6 @@ public:
   //                  1 = polyBLEP at oversampled rate (no upsampling)
   int mOscMode = 0;
 
-
-
   // Voice control (replaces iPlug2 mInputs ControlRamps)
   double mPitch     = 0.0; // 1V/oct relative to A440
   double mPitchBend = 0.0; // pitch bend in octaves
@@ -59,6 +57,7 @@ public:
   float mRawBend      = 0.f; // UI bender lever horizontal [-1, +1]
   float mBenderModAmt = 0.f; // UI bender lever vertical push [0, 1]
   float mOctTranspose = 0.f; // octave shift in semitones (±12)
+
 
   bool mSawOn       = true;
   bool mPulseOn     = true;
@@ -100,23 +99,76 @@ public:
   kr106::Upsampler2x mOscUp2;  // 2× → 4× (used at 4x only)
 
   // --- Unified D7811G firmware tick state (J106 mode) ---
-  // The real D7811G runs one main loop at ~238 Hz that computes ADSR and
-  // VCF DAC for each voice in sequence. A single tick accumulator keeps
-  // them perfectly synchronized — the VCF always reads the just-updated
-  // envelope value from the same loop iteration.
+  // The real D7811G runs one main loop at ~234 Hz (~4.27ms period — emergent
+  // from firmware timing; canonical value in ADSR::kLoopPeriodMs). Each DAC
+  // channel is written sequentially, not simultaneously. The multiplexed DAC
+  // takes one loop pass to cycle through all 23 channels. Each channel's RC
+  // output filter starts integrating from the moment its DAC is written, so
+  // channels written earlier in the loop have more settling time.
+  //
+  // Per-voice VCF and VCA CVs are interleaved: VCF_N then VCA_N.
+  // VCF leads VCA by ~0.125ms (voices 1-5) or ~0.403ms (voice 6).
+  // Voice-to-voice spacing is ~0.287ms.
+  //
+  // We model this with separate sub-tick phase offsets for VCF and VCA
+  // within each tick period. The RC smoothers run every sample; the
+  // "next" values update at their respective phase offsets.
   int mVoiceIndex         = 0;     // set by InitVariance
   int mMidiNote           = 60;    // MIDI note number (for firmware 8.8 pitch)
   float mLfoEnvAmp        = 0.f;   // LFO onset envelope (set by DSP per block)
-  float mFwTickAccum      = 0.f;   // unified tick accumulator [0, 1)
+  float mFwTickAccum      = 0.f;   // main loop tick accumulator [0, 1)
   float mFwTickStep       = 0.f;   // ticks per sample (kTickRate / sampleRate)
-  float mFwEnvNext        = 0.f;   // envelope at current tick
-  float mFwEnvSmooth      = 0.f;   // RC-smoothed envelope output
-  float mGateEnvSmooth    = 0.f;   // RC-smoothed gate envelope
-  uint16_t mVcfDacNext    = 0;     // current tick's DAC output
-  float mVcfDacSmooth     = 0.f;   // RC-smoothed DAC value (before expo conversion)
-  float mDacSmoothCoeff   = 0.f;   // one-pole coefficient for DAC/env smoothing
-  float mPwSmooth         = 0.5f;  // RC-smoothed pulse width (models .01uF cap on PWM CV)
-  float mDcoPitchSmooth   = 0.f;   // RC-smoothed DCO pitch CV (models .01uF cap on DCO CV)
+  float mFwEnvPending     = 0.f;   // computed by FirmwareTick, not yet written to DAC
+  float mFwEnvNext        = 0.f;   // latched to DAC at VCA phase offset
+  uint16_t mVcfDacPending = 0;     // computed by FirmwareTick, not yet written to DAC
+  uint16_t mVcfDacNext    = 0;     // latched to DAC at VCF phase offset
+  bool  mVcfDacUpdated    = false; // has VCF DAC been written this tick?
+  bool  mVcaDacUpdated    = false; // has VCA (env) DAC been written this tick?
+  float mVcfPhase         = 0.f;   // fractional tick offset for VCF DAC write
+  float mVcaPhase         = 0.f;   // fractional tick offset for VCA DAC write
+
+  // DAC timeline phase offsets per voice (from firmware cycle count analysis).
+  // Expressed as fraction of the main-loop tick period.
+  //
+  // The hardware has exactly 6 DAC "slots" for per-voice VCF/VCA writes.
+  // Extended-polyphony modes (8, 10 voices) pair extra logical voices onto
+  // these same 6 physical slots — see kVoiceSlotMap below. This preserves
+  // authentic modulation timing regardless of polyphony setting, at the cost
+  // that paired voices share a DAC-write sample moment (their envelope,
+  // pitch, and audio all remain independent).
+  static constexpr float kTickPeriodMs = ADSR::kLoopPeriodMs;
+  static constexpr float kVcfPhaseTable[6] = {
+    2.2055f / kTickPeriodMs,  // slot 0
+    2.4929f / kTickPeriodMs,  // slot 1
+    2.7803f / kTickPeriodMs,  // slot 2
+    3.0677f / kTickPeriodMs,  // slot 3
+    3.3552f / kTickPeriodMs,  // slot 4
+    3.6426f / kTickPeriodMs,  // slot 5
+  };
+  static constexpr float kVcaPhaseTable[6] = {
+    2.3308f / kTickPeriodMs,  // slot 0
+    2.6182f / kTickPeriodMs,  // slot 1
+    2.9057f / kTickPeriodMs,  // slot 2
+    3.1931f / kTickPeriodMs,  // slot 3
+    3.4805f / kTickPeriodMs,  // slot 4
+    4.0451f / kTickPeriodMs,  // slot 5 (longer gap — ADC/bend block on hardware)
+  };
+
+  // Logical voice index -> physical DAC slot (0-5).
+  //
+  // Voices 0-5 map directly to their hardware-equivalent slots.
+  // Voices 6-9 ride shotgun on the uniformly-spaced slots 1-4, deliberately
+  // avoiding slot 5 (which has the atypical 0.56 ms post-ADC gap). This
+  // keeps extra voices on symmetric timing so voice-stealing and
+  // round-robin allocation behave consistently across the pool.
+  //
+  // Size is the maximum polyphony the voice pool supports; runtime code
+  // uses only the first N entries based on the selected polyphony setting.
+  static constexpr int kMaxPolyphony = 10;
+  static constexpr int kVoiceSlotMap[kMaxPolyphony] = {
+    0, 1, 2, 3, 4, 5,   // voices 0-5: hardware-authentic 6-voice layout
+    1, 2, 3, 4          // voices 6-9: paired onto regular slots 1-4
+  };
 
   // J106 integer parameter cache (set by SetParam, avoids per-sample conversion)
   uint16_t mVcfCutoffInt  = 0;     // 14-bit slider value (0x0000–0x3F80)
@@ -188,6 +240,13 @@ public:
   void InitVariance(int voiceIndex)
   {
     mVoiceIndex = voiceIndex;
+    // Map logical voice index -> physical DAC slot. Voices beyond the
+    // first 6 are paired onto slots 1-4 (see kVoiceSlotMap comment above).
+    int slot = (voiceIndex >= 0 && voiceIndex < kMaxPolyphony)
+               ? kVoiceSlotMap[voiceIndex]
+               : 0;
+    mVcfPhase = kVcfPhaseTable[slot];
+    mVcaPhase = kVcaPhaseTable[slot];
     // Deterministic LCG PRNG seeded by voice index — same offsets every
     // session, modeling one specific unit's fixed component tolerances.
     uint32_t seed = static_cast<uint32_t>(voiceIndex) * 2654435761u + 0x46756E6Bu;
@@ -420,17 +479,18 @@ public:
   //
   // FIRMWARE MECHANICS: The coefficient is used as a linear per-frame add/subtract
   // to an 8.8 fixed-point pitch accumulator (EAH = semitones, EAL = 256ths of a
-  // semitone), running at one frame per 4.2ms (238.1 Hz). Portamento glides toward
-  // the target note and clamps when it arrives. Rate in semitones/sec:
+  // semitone), running at one frame per main-loop pass (ADSR::kTickRate, ~234 Hz
+  // at the calibrated 4.27 ms loop period). Portamento glides toward the target
+  // note and clamps when it arrives. Rate in semitones/sec:
   //
-  //   rate = coeff * 238.1 / 256
+  //   rate = coeff * ADSR::kTickRate / 256
   //
   // TABLE SHAPE: Three observed segments in the original firmware table:
   //
   //   i=0:       coeff=0,   instant glide (porta bypassed entirely)
-  //   i=1..25:   coeff 255→63, linear descent step -8 per index
-  //   i=26..47:  coeff 61→19,  linear descent step -2 per index
-  //   i=48..127: coeff 18→1,   exponential decay ~0.9625 per index
+  //   i=1..25:   coeff 255->63, linear descent step -8 per index
+  //   i=26..47:  coeff 61->19,  linear descent step -2 per index
+  //   i=48..127: coeff 18->1,   exponential decay ~0.9625 per index
   //
   // This gives an overall glide time range of approximately:
   //   fastest (i=1): ~50ms per octave
@@ -438,8 +498,7 @@ public:
   //
   // REFERENCE: Roland Juno-6 voice CPU firmware disassembly, portamento
   // coefficient table $0A00_portCoeffTbl, 128 single-byte entries.
-  // CPU frame rate: 1/4.2ms = 238.1 Hz. Pitch accumulator resolution: 8.8
-  // fixed point (256 steps per semitone).
+  // Pitch accumulator resolution: 8.8 fixed point (256 steps per semitone).
 
   static float portaRate(float t)
   {
@@ -472,7 +531,7 @@ public:
 
     // Convert firmware coefficient to semitones/sec.
     // Caller should divide by sampleRate to get semitones/sample.
-    return coeff * 238.1f / 256.f;
+    return coeff * ADSR::kTickRate / 256.f;
   }
 
   // portaRate_j6() - wrapper for consistent naming.
@@ -677,8 +736,6 @@ public:
     mPortaStep       = semiPerSec / (12.f * mSampleRate);
   }
 
-  // J106 DAC output RC filter: uPD7811G R/2R ladder → 10K/0.1µF lowpass (1ms tau)
-  static constexpr float kDacRcTau = 0.001f;
 
   // Precomputed sample-rate constants (defaults for 44100 Hz)
   float mInvNyq = 1.f / 22050.f;
@@ -692,7 +749,7 @@ public:
   {
     // 1. ADSR tick — updates mEnvInt, may transition state
     mADSR.Tick106();
-    mFwEnvNext = static_cast<float>(mADSR.mEnvInt) / ADSR::kEnvMax;
+    mFwEnvPending = static_cast<float>(mADSR.mEnvInt) / ADSR::kEnvMax;
 
     // 2. VCF DAC — reads the just-updated mEnvInt
     // Convert LFO to firmware format: magnitude + polarity
@@ -716,7 +773,7 @@ public:
         std::clamp(static_cast<int>(glideMidi * 256.f), 0, 127 << 8));
 
     bool envPol = (mVcfEnvInvert > 0);
-    mVcfDacNext = kr106::calc_vcf_freq(
+    mVcfDacPending = kr106::calc_vcf_freq(
         mVcfCutoffInt, vcfLfoSignal, vcfBendAmt,
         mVcfEnvModInt, mVcfKeyTrackInt,
         lfoPolarity, bendPol, envPol,
@@ -796,7 +853,7 @@ public:
     // so the envelope and VCF start immediately at the right level.
     if (mModel == kJ106)
     {
-      mFwEnvNext = mADSR.mEnvNext;
+      mFwEnvPending = mFwEnvNext = mADSR.mEnvNext;
 
       // Compute initial VCF DAC with the actual bend so the filter cutoff
       // starts at the correct frequency on the first sample, even when the
@@ -809,12 +866,11 @@ public:
       bool bendPol = (mRawBend < 0.f);
       uint16_t vcfBendAmt = kr106::calc_vcf_bend_amt(mVcfBendSensInt, bendVal);
       bool envPol = (mVcfEnvInvert > 0);
-      mVcfDacNext = kr106::calc_vcf_freq(
+      mVcfDacPending = mVcfDacNext = kr106::calc_vcf_freq(
           mVcfCutoffInt, 0, vcfBendAmt,
           mVcfEnvModInt, mVcfKeyTrackInt,
           false, bendPol, envPol,
           mADSR.mEnvInt, pitch88);
-      mVcfDacSmooth = static_cast<float>(mVcfDacNext);
     }
 
     if (!isRetrigger)
@@ -862,12 +918,12 @@ public:
     mInvNyq   = 1.f / nyq;      // Hz → normalized cutoff
     mMinCPS   = 20.f * mInvNyq; // 20 Hz floor in normalized units
 
-    // Unified D7811G firmware tick rate (238.1 Hz) — drives ADSR + VCF
+    // Unified D7811G firmware tick rate (~234 Hz at calibrated 4.27ms loop
+    // period; canonical value in ADSR::kLoopPeriodMs) — drives ADSR + VCF
     mFwTickStep = ADSR::kTickRate / mSampleRate;
 
-    mDacSmoothCoeff = 1.f - expf(-1.f / (kDacRcTau * mSampleRate));
-
     UpdatePortaCoeff();
+
   }
 
   // Process a block of base-rate samples.
@@ -924,16 +980,37 @@ public:
       }
       else
       {
-        // J106: unified firmware tick drives ADSR + VCF DAC together.
+        // J106: firmware tick computes new ADSR + VCF DAC values.
+        // The multiplexed DAC writes each channel at a different point
+        // within the 4.2ms tick period. We model this by holding
+        // pending values (mVcfDacPending, mEnvPending) until the
+        // accumulator crosses each channel's phase offset, then
+        // latching them to the smoother targets.
         mFwTickAccum += mFwTickStep;
-        while (mFwTickAccum >= 1.f)
+        if (mFwTickAccum >= 1.f)
         {
           mFwTickAccum -= 1.f;
           FirmwareTick(lfoRaw);
+          // New values computed but not yet written to DAC
+          mVcfDacUpdated = false;
+          mVcaDacUpdated = false;
         }
-        // RC smooth the stairstepped DAC output (1ms tau)
-        mFwEnvSmooth += (mFwEnvNext - mFwEnvSmooth) * mDacSmoothCoeff;
-        env = mFwEnvSmooth;
+        // Latch pending values to DAC output at phase offsets.
+        // Before the latch, the smoother continues tracking the
+        // previous tick's value; after, it starts moving toward the
+        // new value. This models the sequential DAC write order.
+        if (!mVcfDacUpdated && mFwTickAccum >= mVcfPhase)
+        {
+          mVcfDacNext = mVcfDacPending;
+          mVcfDacUpdated = true;
+        }
+        if (!mVcaDacUpdated && mFwTickAccum >= mVcaPhase)
+        {
+          mFwEnvNext = mFwEnvPending;
+          mVcaDacUpdated = true;
+        }
+
+        env = mFwEnvNext;
         mADSR.mEnv = env;
         mADSR.UpdateGateEnv();
       }
@@ -946,7 +1023,7 @@ public:
           // PWM uses raw LFO directly, not onset-enveloped.
           // ROM $0761-$0788: lfoVal used unconditionally, onset envelope
           // ($FF5A) only gates pitch/VCF depth scalars, not PWM path.
-          pw = mDcoPwm * (1.f - lfoRaw) * 0.5f;
+          pw = mDcoPwm * (1.f + lfoRaw) * 0.5f;
           break; // LFO
         case 0:
           pw = mDcoPwm;
@@ -958,13 +1035,12 @@ public:
           pw = mDcoPwm;
       }
       // Per-voice PW calibration variance (hardware component tolerance)
-      float pwMin = 0.50f + mPwMinOffset; // [0.48, 0.52]
-      float pwMax = 0.95f + mPwMaxOffset; // [0.93, 0.97]
-      pw          = pwMin + pw * (pwMax - pwMin);
+      // Linear PW mapping from 106-point hardware duty cycle sweep
+      // (pwm_test, lfrancis unit at 192 kHz). Max error < 0.1%.
+      float pwMin = 0.4949f + mPwMinOffset;
+      float pwMax = 0.9724f + mPwMaxOffset;
+      pw = pwMin + pw * (pwMax - pwMin);
 
-      // RC smooth the PWM CV (hardware: .01uF cap before non-inverting op amp)
-      mPwSmooth += (pw - mPwSmooth) * mDacSmoothCoeff;
-      pw = mPwSmooth;
 
       // --- Pitch modulation ---
       // mDcoLfo is in semitones (from dcoLfoDepth6/106).
@@ -974,9 +1050,6 @@ public:
       float freq = baseFreq * powf(2.f, pitchMod);
       float cps  = freq / mSampleRate;
 
-      // RC smooth the DCO pitch CV (hardware: .01uF cap before non-inverting op amp)
-      mDcoPitchSmooth += (cps - mDcoPitchSmooth) * mDacSmoothCoeff;
-      cps = mDcoPitchSmooth;
 
       // Safety clamp — nothing to write, skip the inner 4× loop.
       if (cps <= 0.f || cps >= 0.5f)
@@ -1011,8 +1084,7 @@ public:
       }
       else
       {
-        mVcfDacSmooth += (static_cast<float>(mVcfDacNext) - mVcfDacSmooth) * mDacSmoothCoeff;
-        float vcfHz = kr106::dacToHz(static_cast<uint16_t>(std::clamp(mVcfDacSmooth, 0.f, 16256.f)));
+        float vcfHz = kr106::dacToHz(std::min(mVcfDacNext, static_cast<uint16_t>(16256)));
         vcfCPS = vcfHz * mInvNyq;
       }
 
@@ -1024,9 +1096,8 @@ public:
 
       // --- VCA gain (base-rate; same gain applied to all 4 sub-samples) ---
       // RC smooth the gate envelope (same 1ms DAC output filter as ADSR)
-      mGateEnvSmooth += (mADSR.mGateEnv - mGateEnvSmooth) * mDacSmoothCoeff;
       float vcaGain = mVcaMode
-        ? kr106::VCAGain(mGateEnvSmooth, mModel) * velocity * mVcaGainScale
+        ? kr106::VCAGain(mADSR.mGateEnv, mModel) * velocity * mVcaGainScale
         : kr106::VCAGain(env,            mModel) * velocity * mVcaGainScale;
 
 
@@ -1049,8 +1120,7 @@ public:
           bool sync = false;
           float s = mOscBLEP.Process(cpsOS, pw, mSawOn, mPulseOn, mSubOn, mDcoSub, 0.f, sync);
           s += noise;
-          float out = mVCF.ProcessSample(s) * vcaGain;
-          mixSlot[k] += out;
+          mixSlot[k] += mVCF.ProcessSample(s) * vcaGain;
           float a = fabsf(s);
           if (a > peak) peak = a;
         }
@@ -1075,6 +1145,7 @@ public:
           float s4[4];
           mOscUp2.process_sample(s4[0], s4[1], s2_0);
           mOscUp2.process_sample(s4[2], s4[3], s2_1);
+        
           mixSlot[0] += mVCF.ProcessSample(s4[0]) * vcaGain;
           mixSlot[1] += mVCF.ProcessSample(s4[1]) * vcaGain;
           mixSlot[2] += mVCF.ProcessSample(s4[2]) * vcaGain;
@@ -1084,6 +1155,7 @@ public:
         {
           float s2_0, s2_1;
           mOscUp1.process_sample(s2_0, s2_1, oscOut);
+        
           mixSlot[0] += mVCF.ProcessSample(s2_0) * vcaGain;
           mixSlot[1] += mVCF.ProcessSample(s2_1) * vcaGain;
         }
@@ -1126,10 +1198,10 @@ public:
     {
       float lfoRaw = lfoRawBuffer ? static_cast<float>(lfoRawBuffer[i]) : 0.f;
 
-      // Fire firmware VCF ticks at 238.1 Hz. Accumulator phase is shared
-      // with the busy path (mFwTickAccum is a single member) so tick
-      // timing is continuous across idle/busy transitions — matches the
-      // real firmware loop which runs continuously regardless of voice
+      // Fire firmware VCF ticks at ADSR::kTickRate (~234 Hz). Accumulator
+      // phase is shared with the busy path (mFwTickAccum is a single member)
+      // so tick timing is continuous across idle/busy transitions — matches
+      // the real firmware loop which runs continuously regardless of voice
       // gate state.
       mFwTickAccum += mFwTickStep;
       while (mFwTickAccum >= 1.f)
@@ -1138,9 +1210,7 @@ public:
         FirmwareTickIdleVcfJ106(lfoRaw);
       }
 
-      // RC-smooth the DAC output (same 1ms tau as the busy path).
-      mVcfDacSmooth += (static_cast<float>(mVcfDacNext) - mVcfDacSmooth) * mDacSmoothCoeff;
-      float vcfHz = kr106::dacToHz(static_cast<uint16_t>(std::clamp(mVcfDacSmooth, 0.f, 16256.f)));
+      float vcfHz = kr106::dacToHz(std::min(mVcfDacNext, static_cast<uint16_t>(16256)));
       float vcfCPS = vcfHz * mInvNyq;
 
       // Control-rate VCF coefficient update. Pass 0 to TrackInputEnv so

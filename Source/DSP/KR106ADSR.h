@@ -90,7 +90,24 @@ struct ADSR
   static constexpr float kSilence         = 1e-5f;   // -100dB: J6 release termination threshold
   static constexpr float kAttackTarget    = 1.2f;    // RC charge overshoot (hardware comparator)
   static constexpr float kReleaseTarget   = -0.1f;   // below zero (ensures finite release)
-  static constexpr float kTickRate        = 1000.f / 4.2f; // D7811G DAC update rate ≈ 238 Hz
+
+  // ---------------------------------------------------------------------------
+  // Firmware main-loop period. Canonical source for all firmware-rate timing
+  // across the plugin (ADSR here, LFO rate/delay, VCF tick, portamento).
+  //
+  // On hardware this is emergent (not regulated) and varies ~±3% with voice
+  // state. 4.27 ms is the average of four hardware LFO-rate measurements
+  // (lfrancis unit, coeffs 380/698/1800/1960, 96 kHz capture) once the
+  // integer-stepping accumulator model is applied. See KR106LFO.h for the
+  // full derivation and verification table.
+  //
+  // Change this ONE value to recalibrate all firmware-rate modulation
+  // coherently; downstream constants (kTickRate in ADSR, kLoopTickRate in
+  // LFO, kTickPeriodMs in Voice, portamento rate in Voice) all derive from
+  // it and will update automatically.
+  // ---------------------------------------------------------------------------
+  static constexpr float kLoopPeriodMs = 4.27f;
+  static constexpr float kTickRate     = 1000.f / kLoopPeriodMs; // ≈ 234.2 Hz
   static constexpr uint16_t kEnvMax       = 0x3FFF;  // 14-bit envelope maximum
 
   // Attack increment from slider position (0..1).
