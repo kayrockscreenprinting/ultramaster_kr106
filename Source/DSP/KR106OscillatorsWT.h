@@ -207,7 +207,6 @@ struct OscillatorsWT {
   int   mSubTblIdx   = 0;
   float mSubTblBlend = 0.f;
   float mEffPW       = 0.5f;
-  float mPwDC        = 0.f;   // 2 * effPW - 1
   float mSawTarget   = 1.f;   // target for mSawGain ramp
   float mPulseTarget = 1.f;
   float mSubTarget   = 0.f;
@@ -259,12 +258,11 @@ struct OscillatorsWT {
     SawTables::OctaveToTable(octave,        mSawTblIdx, mSawTblBlend);
     SawTables::OctaveToTable(octave - 1.f,  mSubTblIdx, mSubTblBlend);
 
-    // Pulse width: invert + clamp, then the -DC offset term.
+    // Pulse width: invert + clamp
     float effPW = pulseWidth;
     if (mPulseInvert) effPW = 1.f - effPW;
     effPW = std::clamp(effPW, 0.01f, 0.99f);
     mEffPW = effPW;
-    mPwDC  = 2.f * effPW - 1.f;
 
     // Gain-ramp targets. The per-sample ramp itself stays in
     // ProcessSample because it's state, but the target is constant.
@@ -332,10 +330,10 @@ struct OscillatorsWT {
 
       if (pulseActive)
       {
-        // Pulse = saw(phase) - saw(phase - pw) - DC. Bandlimited by
+        // Pulse = saw(phase) - saw(phase - pw). Bandlimited by
         // construction (difference of two bandlimited saws).
         float pulseShift = mTables->ReadBlended(mPos - mEffPW, mSawTblIdx, mSawTblBlend);
-        float pulse = sawAtPos - pulseShift - mPwDC;
+        float pulse = sawAtPos - pulseShift;
         out += pulse * mPulseAmp * mPulseGain;
       }
     }

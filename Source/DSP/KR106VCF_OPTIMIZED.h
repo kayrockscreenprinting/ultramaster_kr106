@@ -104,7 +104,6 @@ struct VCF
     float invKFbScale;
     float noiseLevel;    // adaptive thermal noise (control-rate)
     float otaScale;      // per-stage OTA drive (constant kOTAScaleBase)
-    float dfCoeff;       // describing function sensitivity
   } mC;
 
   VCF() {}
@@ -256,8 +255,44 @@ struct VCF
 
       mCacheK = k;
 
+      // Peak-pull compensation — empirical fit from HW noise grid.
+      // A bilinear 4-pole TPT cascade intrinsically pulls its peak
+      // below nominal cutoff, but HW shows only a mild, roughly
+      // constant pull (~+150-300¢ across k=1..3.5, falling to 0 at
+      // k≥4). Theoretical linear-bilinear pull curve overcompensates
+      // at low k — likely because HW's BA662 loop has phase
+      // characteristics the ideal model doesn't capture. Fit is
+      // 3rd-order polynomial in k, calibrated directly to 10×10
+      // noise grid measurement.
       float frqOver = std::min(frq * mOverScale, 0.85f);
       mCacheG = tanf(frqOver * static_cast<float>(M_PI) * 0.5f);
+
+      float kFit = std::clamp(k, 0.f, 5.0f);
+      float logM = 0.20646f
+                 + kFit * (-0.04140f
+                          + kFit * (0.00602f
+                                   - kFit * 0.00127f));
+
+      // Fade out below k=1: no resonant peak to compensate for
+      // (filter is in pure-rolloff regime at low resonance).
+      if (k < 1.0f) logM *= std::max(k, 0.f);
+
+      // Fade out above k=3.7: approaching and entering self-osc, the
+      // natural peak pull collapses to zero (HW data shows peak sits
+      // essentially on dacToHz target at R=127). Linear fade to zero
+      // by k=4.4 so self-osc pitch isn't pushed above target.
+      if (k > 3.7f) {
+          float fade = std::max(0.f, (4.4f - k) / 0.7f);
+          fade = std::min(1.f, fade);
+          logM *= fade;
+      }
+
+      mCacheG *= expf(logM);
+      mCacheG = std::min(mCacheG, 10.f);
+
+      // Guard against pushing g past where the TPT approximation stays
+      // well-behaved. 10.0 corresponds to digital cutoff ≈ 0.94 * Nyquist.
+      mCacheG = std::min(mCacheG, 10.f);
     }
 
     const float k = mCacheK; // post-fade effective k
@@ -275,7 +310,6 @@ struct VCF
     mC.G = G;
     mC.invDen = 1.f / (1.f + k * G);
 
-    mC.dfCoeff = 0.6f;
     mC.otaScale = kOTAScaleBase;
 
     // Feedback saturation drive. Fit empirically so kFbScale reaches
@@ -346,8 +380,14 @@ struct VCF
     float u = (input * kDirectGain + mC.k * otaOut) * mC.invDen;
 
     // Per-stage describing function pitch compensation.
+    // At high state amplitude (self-osc, large feedback signal) the tanh
+    // in NLStage effectively lowers the stage gain, which shifts pitch.
+    // dfGain compensates by pushing g1 up when state amplitude is large.
+    // This works alongside the k-based compensation in UpdateCoeffs —
+    // that handles linear bilinear warping, this handles nonlinear
+    // saturation-induced pitch shift that only appears in self-osc.
     float stateAmp = fabsf(mS[3]);
-    float dfGain = 1.f / sqrtf(1.f + mC.dfCoeff * stateAmp * stateAmp);
+    float dfGain = 1.f / sqrtf(1.f + 0.6f * stateAmp * stateAmp);
     dfGain = std::max(dfGain, 0.65f);
     float g1NL = std::min(mC.g1 / dfGain, 0.98f);
     float gNL  = g1NL / (1.f - g1NL);
@@ -356,7 +396,7 @@ struct VCF
     float lp2 = NLStage(mS[1], lp1, gNL, g1NL, mC.otaScale);
     float lp3 = NLStage(mS[2], lp2, gNL, g1NL, mC.otaScale);
     float lp4 = NLStage(mS[3], lp3, gNL, g1NL, mC.otaScale);
-
+    
     // Output gain: passband makeup gain for the 4-pole cascade.
     // kDirectGain × 8.59 = 1.22 (passband near unity at R=0).
     return lp4 * 8.59f;

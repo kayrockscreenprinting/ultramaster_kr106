@@ -106,8 +106,8 @@ struct ADSR
   // LFO, kTickPeriodMs in Voice, portamento rate in Voice) all derive from
   // it and will update automatically.
   // ---------------------------------------------------------------------------
-  static constexpr float kLoopPeriodMs = 4.27f;
-  static constexpr float kTickRate     = 1000.f / kLoopPeriodMs; // ≈ 234.2 Hz
+  static constexpr float kLoopPeriodMs = 4.2335;
+  static constexpr float kTickRate = 1000.f / kLoopPeriodMs; // ≈ 234.2 Hz
   static constexpr uint16_t kEnvMax       = 0x3FFF;  // 14-bit envelope maximum
 
   // Attack increment from slider position (0..1).

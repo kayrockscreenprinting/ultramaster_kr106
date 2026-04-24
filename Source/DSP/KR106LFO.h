@@ -94,12 +94,26 @@ struct LFO
   double mHostBPM    = 120.0;
   int mDivision      = kLfoDiv4; // current division (when synced)
 
+  // --- J106 integer LFO state (firmware-accurate) ---
+  // 16-bit accumulator, range 0x0000-0x1FFF, advances by speed coeff
+  // every other main-loop tick. Direction flips on overflow/underflow
+  // with clamping. Polarity toggles on each direction change.
+  uint16_t mIntAccum     = 0;      // $FF4D: LFO accumulator 0x0000-0x1FFF
+  uint16_t mIntCoeff     = 0;      // speed table coefficient for current rate
+  bool     mIntRising    = true;   // accumulator direction
+  bool     mIntPolarity  = false;  // toggles each direction change (bit 1 of $FF4A)
+  float    mIntTri       = 0.f;    // held triangle output [-1,+1]
+
   // --- J106 two-stage delay state ---
-  float mHoldoffRemaining = 0.f; // samples remaining in holdoff phase
-  float mRampPerSample    = 0.f; // depth increment per sample during ramp
-  bool  mInHoldoff        = false;
-  bool  mArmed            = true; // armed for reset (all voices were silent)
-  float mSlider           = 0.f; // stored slider value for reset
+  // Delay envelope also advances at tick rate on hardware.
+  uint16_t mHoldoffAccum  = 0;     // $FF56: holdoff accumulator
+  uint16_t mHoldoffInc    = 0;     // attack table coefficient for holdoff rate
+  uint16_t mRampAccum     = 0;     // $FF5A: ramp accumulator (depth = high byte / 255)
+  uint16_t mRampInc       = 0;     // ramp table coefficient
+  bool     mInHoldoff     = false;
+  bool     mArmed         = true;  // armed for reset (all voices were silent)
+  float    mSlider        = 0.f;   // stored slider value for reset
+  float    mAmpInt        = 0.f;   // held onset envelope [0,1] for J106
 
   // J60 LFO rate: same circuit as J6 (A-taper pot differs but function is same).
   // TODO: J60 uses 50KA pot (J6 uses A54), may need different alpha curve.
@@ -251,6 +265,13 @@ struct LFO
   {
     mSampleRate = sampleRate;
     mFreq       = lfoFreq(slider) / sampleRate;
+    // J106: store integer speed coefficient for tick-rate accumulator
+    if (mModel == kJ106)
+    {
+      int byte = static_cast<int>(slider * 127.f + 0.5f);
+      byte = std::clamp(byte, 0, 127);
+      mIntCoeff = kLfoSpeedTbl[byte];
+    }
   }
 
   // FIXME(kr106) Measure LFO delay vs slider voltage on hardware Juno-6
@@ -338,6 +359,109 @@ struct LFO
   void SetTrigger(bool trig) { mTrigger = trig; }
   void SetVoiceActive(bool busy, bool gated) { mActive = busy; mGated = gated; }
 
+  // Update gate/reset state. Call once per block before filling LFO buffer.
+  // For J106, this handles the arm/reset logic that was in Process() for J6.
+  void UpdateGateState()
+  {
+    bool newState = mActive || mTrigger;
+    bool gated = mGated || mTrigger;
+
+    if (gated && !mWasGated)
+    {
+      if (mMode == 1 || mArmed)
+      {
+        mAmp = 0.f;
+        mAmpInt = 0.f;
+        mArmed = false;
+        if (mModel != kJ106)
+          RecalcDelayJ6();
+        else
+        {
+          // Reset only the onset envelope ($FF56 holdoff, $FF5A ramp)
+          // — matches ROM $0318/$031C. The LFO accumulator $FF4D and
+          // direction/polarity flag $FF4A are never reset in hardware;
+          // they free-run from power-on. This is the mechanism behind
+          // the B54/A87 "growing signal over retriggers" behavior.
+          RecalcDelay106();
+        }
+      }
+    }
+    if (!gated && mWasGated)
+      mArmed = true;
+
+    mWasGated = gated;
+    mWasActive = newState;
+  }
+
+  // J106 integer LFO tick. Call once per main-loop tick (~234 Hz).
+  // Advances the integer accumulator and onset envelope, matching the
+  // D7811G firmware at $074E.
+  void Tick106()
+  {
+    // Advance accumulator
+    if (mIntRising)
+    {
+      uint32_t sum = static_cast<uint32_t>(mIntAccum) + mIntCoeff;
+      if (sum >= 0x2000)
+      {
+        mIntAccum = 0x1FFF; // clamp at ceiling
+        mIntRising = false;
+        // Polarity does NOT flip here. INRW $FF4A increments the flag byte:
+        // at the top clamp, bit 0 goes 0->1 or 0->1 (after bit 1 flip), but
+        // bit 1 (polarity) is only toggled by the carry out of bit 0, which
+        // occurs at the *bottom* clamp. One full audible period = 4 half-
+        // sweeps of the accumulator, with a single polarity flip per period.
+      }
+      else
+        mIntAccum = static_cast<uint16_t>(sum);
+    }
+    else
+    {
+      if (mIntCoeff > mIntAccum)
+      {
+        mIntAccum = 0x0000; // clamp at floor
+        mIntRising = true;
+        mIntPolarity = !mIntPolarity; // INRW carry: %01->%10 or %11->%00
+      }
+      else
+        mIntAccum -= mIntCoeff;
+    }
+
+    // Convert accumulator to triangle [-1, +1].
+    // Accumulator range 0x0000-0x1FFF maps to 0.0-1.0.
+    // Polarity bit determines sign.
+    float mag = static_cast<float>(mIntAccum) / 8191.f;
+    mIntTri = mIntPolarity ? -mag : mag;
+
+    // Onset envelope: holdoff then ramp, also at tick rate.
+    if (mInHoldoff)
+    {
+      uint32_t sum = static_cast<uint32_t>(mHoldoffAccum) + mHoldoffInc;
+      if (sum >= 0x4000)
+      {
+        mInHoldoff = false;
+        mHoldoffAccum = 0x4000;
+      }
+      else
+        mHoldoffAccum = static_cast<uint16_t>(sum);
+      mAmpInt = 0.f; // silent during holdoff
+    }
+    else
+    {
+      uint32_t sum = static_cast<uint32_t>(mRampAccum) + mRampInc;
+      if (sum >= 0x10000)
+      {
+        mRampAccum = 0xFFFF;
+        mAmpInt = 1.f;
+      }
+      else
+      {
+        mRampAccum = static_cast<uint16_t>(sum);
+        mAmpInt = static_cast<float>(mRampAccum >> 8) / 255.f;
+      }
+    }
+  }
+
   // Process one sample, returns [-1, +1]
   float Process()
   {
@@ -354,39 +478,10 @@ struct LFO
       mHostWasPlaying = mHostPlaying;
     }
 
-    // D7811G firmware LFO delay state machine:
-    // Reset trigger: all voices go silent (voiceRun=0), then a new note starts.
-    // Legato (voiceRun stays nonzero) does NOT reset the delay.
-    // Manual mode: resets on each new gate (each key-on).
+    // Gate/reset state is handled by UpdateGateState() called once per block.
+    // For J6/J60 Process() is called per-sample, but gate state only changes
+    // at block boundaries when SetVoiceActive is called, so this is equivalent.
     bool newState = mActive || mTrigger;
-    bool gated = mGated || mTrigger;
-
-    if (gated && !mWasGated)
-    {
-      // Manual: always reset on new gate
-      // Auto/J106: only reset when armed (all voices were silent)
-      if (mMode == 1 || mArmed)
-      {
-        mAmp = 0.f;
-        mArmed = false;
-        if (mModel != kJ106)
-          RecalcDelayJ6();
-        else
-          RecalcDelay106();
-      }
-    }
-    // All models: arm reset when all voices go silent.
-    // Do NOT zero mAmp here -- the ROM keeps $FF5A_lfoDelayEnv at its
-    // current level during release. Zeroing it kills LFO modulation
-    // on the release tail, which doesn't match hardware behavior.
-    // mAmp is reset to 0 on the next note-on (via the mArmed path above).
-    if (!gated && mWasGated)
-    {
-      mArmed = true;
-    }
-
-    mWasGated = gated;
-    mWasActive = newState;
 
     mPos += freq;
     if (mPos >= 1.f)
@@ -398,30 +493,12 @@ struct LFO
     // after silence; it does not pause accumulation during release tails.
     if (newState && mAmp < 1.f)
     {
-      if (mModel != kJ106)
-      {
-        // J6: RC exponential envelope approaching 1.0 asymptotically
-        if (mDelayCoeff <= 0.f)
-          mAmp = 1.f; // instant
-        else
-          mAmp += mDelayCoeff * (1.f - mAmp);
-      }
+      // J6/J60: RC exponential envelope approaching 1.0 asymptotically.
+      // (J106 onset envelope is handled by Tick106(), not Process().)
+      if (mDelayCoeff <= 0.f)
+        mAmp = 1.f; // instant
       else
-      {
-        // J106: holdoff (silent) then linear ramp
-        if (mInHoldoff)
-        {
-          mHoldoffRemaining -= 1.f;
-          if (mHoldoffRemaining <= 0.f)
-            mInHoldoff = false;
-          // mAmp stays 0 during holdoff
-        }
-        else
-        {
-          mAmp += mRampPerSample;
-          if (mAmp >= 1.f) mAmp = 1.f;
-        }
-      }
+        mAmp += mDelayCoeff * (1.f - mAmp);
     }
 
     // Rounded triangle: linear triangle with soft-clipped peaks
@@ -450,11 +527,15 @@ private:
 
   void RecalcDelay106()
   {
-    float holdoff = lfoHoldoffSeconds106(mSlider);
-    mHoldoffRemaining = holdoff * mSampleRate;
-    mInHoldoff = (mHoldoffRemaining > 0.f);
-    float rampPerSec = lfoRampPerSecond106(mSlider);
-    mRampPerSample = rampPerSec / mSampleRate;
+    // Integer delay state for Tick106()
+    mHoldoffInc = ADSR::AttackIncFromSlider(mSlider);
+    mHoldoffAccum = 0;
+    mInHoldoff = (mHoldoffInc < ADSR::kEnvMax); // instant if inc >= kEnvMax
+    int pot = static_cast<int>(mSlider * 127.f + 0.5f);
+    int idx = std::clamp(pot >> 4, 0, 7);
+    mRampInc = kLfoRampTable[idx];
+    mRampAccum = 0;
+    mAmpInt = 0.f;
   }
 };
 

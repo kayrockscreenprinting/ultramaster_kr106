@@ -88,6 +88,12 @@ public:
   // scale noise seeding, so control-rate updates are audibly identical).
   float mLastOscPeak = 0.f;
 
+  // BA662 VCA analog slew: one-pole RC on VCA gain, models the physical
+  // response time of the VCA circuit. Both gate and envelope modes pass
+  // through this. Prevents clicks on instant transitions (ATK=0, gate on/off).
+  float mVcaSlew      = 0.f;
+  float mVcaSlewCoeff = 0.f;
+
   // Per-voice upsampler pair: 1× → 2× → 4×.
   // Oscillator runs at base rate (cheap); its output is upsampled to
   // 4× before feeding into the VCF. The mix bus then sums all voices
@@ -873,12 +879,15 @@ public:
           mADSR.mEnvInt, pitch88);
     }
 
+    // VCF is NOT reset — matches hardware where the filter runs
+    // continuously (self-oscillation persists between notes).
+    // DCO resets only when the voice was fully idle (release finished).
+    // Retriggers while still sounding preserve oscillator phase,
+    // matching hardware where the DCO free-runs during release.
     if (!isRetrigger)
     {
       mOsc.Reset();
-      // VCF is NOT reset on note-on — matches real hardware where
-      // the filter runs continuously (self-oscillation persists
-      // between notes, frequency just shifts with keyboard tracking).
+      mVcaSlew = 0.f;
     }
   }
 
@@ -910,6 +919,9 @@ public:
       }
     }
     mOsc.Init(mSampleRate);
+
+    static constexpr float kVcaSlewTau = 0.00058f; // ~0.58ms, matches hardware
+    mVcaSlewCoeff = 1.f - expf(-1.f / (kVcaSlewTau * mSampleRate));
 
     // Precomputed constants for VCF frequency calculation.
     // VCF modulation works in log-frequency space; these convert
@@ -981,33 +993,18 @@ public:
       else
       {
         // J106: firmware tick computes new ADSR + VCF DAC values.
-        // The multiplexed DAC writes each channel at a different point
-        // within the 4.2ms tick period. We model this by holding
-        // pending values (mVcfDacPending, mEnvPending) until the
-        // accumulator crosses each channel's phase offset, then
-        // latching them to the smoother targets.
+        // On hardware the multiplexed DAC writes each channel at a
+        // different point within the tick period (see kVcfPhaseTable /
+        // kVcaPhaseTable for the per-voice offsets). Currently all CVs
+        // latch simultaneously at tick time -- the phase infrastructure
+        // is preserved for future stagger experiments but inactive.
         mFwTickAccum += mFwTickStep;
         if (mFwTickAccum >= 1.f)
         {
           mFwTickAccum -= 1.f;
           FirmwareTick(lfoRaw);
-          // New values computed but not yet written to DAC
-          mVcfDacUpdated = false;
-          mVcaDacUpdated = false;
-        }
-        // Latch pending values to DAC output at phase offsets.
-        // Before the latch, the smoother continues tracking the
-        // previous tick's value; after, it starts moving toward the
-        // new value. This models the sequential DAC write order.
-        if (!mVcfDacUpdated && mFwTickAccum >= mVcfPhase)
-        {
           mVcfDacNext = mVcfDacPending;
-          mVcfDacUpdated = true;
-        }
-        if (!mVcaDacUpdated && mFwTickAccum >= mVcaPhase)
-        {
           mFwEnvNext = mFwEnvPending;
-          mVcaDacUpdated = true;
         }
 
         env = mFwEnvNext;
@@ -1049,7 +1046,6 @@ public:
           mOctTranspose / 12.f + mPitchOffset + lfoSemitones / 12.f + mRawBend * mBendDco;
       float freq = baseFreq * powf(2.f, pitchMod);
       float cps  = freq / mSampleRate;
-
 
       // Safety clamp — nothing to write, skip the inner 4× loop.
       if (cps <= 0.f || cps >= 0.5f)
@@ -1095,11 +1091,14 @@ public:
       mVCF.UpdateCoeffs(vcfCPS, mVcfRes);
 
       // --- VCA gain (base-rate; same gain applied to all 4 sub-samples) ---
-      // RC smooth the gate envelope (same 1ms DAC output filter as ADSR)
-      float vcaGain = mVcaMode
-        ? kr106::VCAGain(mADSR.mGateEnv, mModel) * velocity * mVcaGainScale
-        : kr106::VCAGain(env,            mModel) * velocity * mVcaGainScale;
-
+      // Gate mode: full on/off from gate state. Env mode: ADSR envelope.
+      // Both pass through the BA662 VCA slew (one-pole RC) which models
+      // the physical response time -- prevents clicks on instant transitions.
+      float vcaRaw = mVcaMode
+        ? (mADSR.mState != kr106::ADSR::kRelease && mADSR.mState != kr106::ADSR::kFinished ? 1.f : 0.f)
+        : env;
+      mVcaSlew += mVcaSlewCoeff * (vcaRaw - mVcaSlew);
+      float vcaGain = kr106::VCAGain(mVcaSlew, mModel) * velocity * mVcaGainScale;
 
       float* mixSlot = mixBus + i * mOversample;
 

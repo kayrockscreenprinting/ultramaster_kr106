@@ -29,10 +29,10 @@ static constexpr float kNoiseAmpJ6  = 1.f;
 // to noise RMS at HPF flat, VCF wide open).
 // Sub/pulse ratio: 1.51x from osc_calibrate recording (both square waves,
 // ratio is recording-gain-independent).
-static constexpr float kSawAmpJ106    = 0.5f;
+static constexpr float kSawAmpJ106    = 0.6f;
 static constexpr float kPulseAmpJ106  = 0.5f;
 static constexpr float kSubAmpJ106    = 0.75f;
-static constexpr float kNoiseAmpJ106  = 1.f;
+static constexpr float kNoiseAmpJ106  = 1.2f;
 
 static constexpr float kSwitchRamp = 1.f / 64.f; // ~1.5ms at 44.1k (overwritten by Init)
 
@@ -214,6 +214,7 @@ struct Oscillators {
       if (mPulseInvert) effPW = 1.f - effPW; // J106: inverted duty cycle
       effPW = std::clamp(effPW, 0.03f, 0.97f);
       float pulse = (mPos < effPW) ? -1.f : 1.f;
+      pulse -= (1.f - 2.f * effPW);   // DC correction: subtract the mean
       pulse -= blepAtReset;              // falling edge at reset (shared)
       float pw2 = mPos - effPW;
       if (pw2 < 0.f) pw2 += 1.f;

@@ -46,6 +46,7 @@ namespace kr106 {
 struct HPF
 {
   static constexpr float kDCBlockHz = 4.f;
+
   static constexpr int kXfadeSamples = 64; // ~1.5 ms at 44.1k
   // J6 PCHIP curve sampled at 4 switch positions (0/3, 1/3, 2/3, 3/3)
   static constexpr float kJ6Freqs[4] = { 38.6f, 260.f, 530.f, 1394.f };
@@ -447,11 +448,38 @@ public:
     if (mPortaMode == 0 && mUnisonNote >= 0) anyGated = true;
     mLFO.SetVoiceActive(anyBusy, anyGated);
 
-    for (int s = 0; s < nFrames; s++)
+    mLFO.UpdateGateState();
+
+    if (mSynthModel == kr106::kJ106 && !mLFO.mSyncToHost)
     {
-      mLFOBuffer[s] = static_cast<T>(mLFO.Process());
-      mLFORawBuffer[s] = static_cast<T>(mLFO.mLastTri);
-      mNoiseBuffer[s] = static_cast<T>(mNoise.Process());
+      // J106 free-running: integer LFO advances at tick rate (~234 Hz).
+      // Output is held (stairstepped) between ticks, matching firmware.
+      for (int s = 0; s < nFrames; s++)
+      {
+        mLfoTickAccum += mLfoTickStep;
+        if (mLfoTickAccum >= 1.f)
+        {
+          mLfoTickAccum -= 1.f;
+          mLFO.Tick106();
+        }
+        float tri = mLFO.mIntTri;
+        float amp = mLFO.mAmpInt;
+        mLFOBuffer[s] = static_cast<T>(tri * amp);
+        mLFORawBuffer[s] = static_cast<T>(tri);
+        mNoiseBuffer[s] = static_cast<T>(mNoise.Process());
+      }
+      mLFO.mLastTri = mLFO.mIntTri;
+      mLFO.mAmp = mLFO.mAmpInt;
+    }
+    else
+    {
+      // J6/J60 or DAW-synced J106: per-sample smooth LFO
+      for (int s = 0; s < nFrames; s++)
+      {
+        mLFOBuffer[s] = static_cast<T>(mLFO.Process());
+        mLFORawBuffer[s] = static_cast<T>(mLFO.mLastTri);
+        mNoiseBuffer[s] = static_cast<T>(mNoise.Process());
+      }
     }
 
     mModulations[kModLFO]    = mLFOBuffer.data();
@@ -605,6 +633,8 @@ public:
   {
     mSampleRate = static_cast<float>(sampleRate);
     mDacSmoothCoeff = 1.f - expf(-1.f / (0.001f * mSampleRate)); // 1ms RC tau
+    mLfoTickStep = kr106::ADSR::kTickRate / mSampleRate;
+    mLfoTickAccum = 0.f;
 
     // Post-VCA low-pass: models uPC1252H2 VCA output pole.
     static constexpr float kPostVcaFc = 100000.f;
@@ -728,6 +758,8 @@ public:
   float mMasterVol = 1.f;
   float mMasterVolSmooth = 1.f;
   float mSampleRate = 44100.f;
+  float mLfoTickAccum = 0.f;  // LFO tick accumulator (J106 integer LFO)
+  float mLfoTickStep  = 0.f;  // ticks per sample (kTickRate / sampleRate)
   int mOctaveTranspose = 0;
   double mTuning = 0.;
   int mKeyTranspose = 0;
