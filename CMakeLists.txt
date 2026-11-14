@@ -1,13 +1,39 @@
 cmake_minimum_required(VERSION 3.22)
-project(KR106 VERSION 2.5.13)
+project(KR106 VERSION 2.5.13 LANGUAGES C CXX)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
+
+option(KR106_HEADLESS "Build headless plugin without GUI/X11/FreeType dependencies (Akai Force / embedded Linux)" OFF)
+option(KR106_COPY_AFTER_BUILD "Copy plugins to system directories after build" ON)
+
+if(KR106_HEADLESS)
+    # Prevent JUCE from linking libfreetype, libfontconfig, and libasound in headless mode
+    if(NOT TARGET juce::pkgconfig_juce_graphics_LINUX_DEPS)
+        add_library(pkgconfig_juce_graphics_LINUX_DEPS INTERFACE)
+        add_library(juce::pkgconfig_juce_graphics_LINUX_DEPS ALIAS pkgconfig_juce_graphics_LINUX_DEPS)
+    endif()
+    if(NOT TARGET juce::pkgconfig_juce_audio_devices_LINUX_DEPS)
+        add_library(pkgconfig_juce_audio_devices_LINUX_DEPS INTERFACE)
+        add_library(juce::pkgconfig_juce_audio_devices_LINUX_DEPS ALIAS pkgconfig_juce_audio_devices_LINUX_DEPS)
+    endif()
+endif()
 
 add_subdirectory(libs/JUCE)
 add_subdirectory(libs/clap-juce-extensions EXCLUDE_FROM_ALL)
 
-set(KR106_FORMATS AU VST3 LV2 Standalone)
-option(KR106_COPY_AFTER_BUILD "Copy plugins to system directories after build" ON)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/vst2_sdk/pluginterfaces/vst2.x/aeffect.h")
+    juce_set_vst2_sdk_path("${CMAKE_CURRENT_SOURCE_DIR}/libs/vst2_sdk")
+endif()
+
+if(KR106_HEADLESS)
+    set(KR106_DEFAULT_FORMATS VST VST3 LV2)
+    set(KR106_VST3_MANIFEST FALSE)
+else()
+    set(KR106_DEFAULT_FORMATS AU VST3 LV2 Standalone)
+    set(KR106_VST3_MANIFEST TRUE)
+endif()
+
+set(KR106_FORMATS ${KR106_DEFAULT_FORMATS} CACHE STRING "Plugin formats to build")
 
 juce_add_plugin(KR106
     COMPANY_NAME "Kayrock"
@@ -24,42 +50,31 @@ juce_add_plugin(KR106
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/img/icon_1024.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/resources/img/icon_1024.png"
     LV2URI "https://kayrock.org/kr106"
+    VST3_AUTO_MANIFEST ${KR106_VST3_MANIFEST}
     COPY_PLUGIN_AFTER_BUILD ${KR106_COPY_AFTER_BUILD}
 )
 
-juce_add_binary_data(KR106BinaryData SOURCES
-    resources/img/kr106_background@2x.png
-    resources/img/knob@2x.png
-    resources/img/smallknob@2x.png
-    resources/img/switch_3way@2x.png
-    resources/img/switch_3way_horizontal@2x.png
-    resources/img/led_red@2x.png
-    resources/img/kr106_bender_gradient@2x.png
-    resources/img/transpose_chevron@2x.png
-    resources/img/new_knob@2x.png
-    resources/img/slider_handle@2x.png
-    resources/fonts/Segment14.otf
-)
+if(NOT KR106_HEADLESS)
+    juce_add_binary_data(KR106BinaryData SOURCES
+        resources/img/kr106_background@2x.png
+        resources/img/knob@2x.png
+        resources/img/smallknob@2x.png
+        resources/img/switch_3way@2x.png
+        resources/img/switch_3way_horizontal@2x.png
+        resources/img/led_red@2x.png
+        resources/img/kr106_bender_gradient@2x.png
+        resources/img/transpose_chevron@2x.png
+        resources/img/new_knob@2x.png
+        resources/img/slider_handle@2x.png
+        resources/fonts/Segment14.otf
+    )
+endif()
 
 target_sources(KR106 PRIVATE
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp
     Source/PluginProcessor.h
-    Source/PluginEditor.h
     Source/KR106PresetManager.h
     Source/KR106_Presets_JUCE.h
-    Source/Controls/KR106Bender.h
-    Source/Controls/KR106Button.h
-    Source/Controls/KR106Keyboard.h
-    Source/Controls/KR106MenuSheet.h
-    Source/Controls/KR106Knob.h
-    Source/Controls/KR106Misc.h
-    Source/Controls/KR106PresetDisplay.h
-    Source/Controls/KR106Scope.h
-    Source/Controls/KR106Slider.h
-    Source/Controls/KR106Switch.h
-    Source/Controls/KR106Tooltip.h
-    Source/Controls/KR106VarianceSheet.h
     Source/DSP/BBDFilter.h
     Source/DSP/KR106ADSR.h
     Source/DSP/KR106Arpeggiator.h
@@ -67,7 +82,6 @@ target_sources(KR106 PRIVATE
     Source/DSP/KR106LFO.h
     Source/DSP/KR106Noise.h
     Source/DSP/KR106Resampler.h
-
     Source/DSP/KR106VCF.h
     Source/DSP/KR106VCF_OPTIMIZED.h
     Source/DSP/KR106VcfFreqJ106.h
@@ -77,6 +91,25 @@ target_sources(KR106 PRIVATE
     Source/DSP/KR106_DSP_SetParam.h
     Source/DSP/KR106_HPF.h
 )
+
+if(NOT KR106_HEADLESS)
+    target_sources(KR106 PRIVATE
+        Source/PluginEditor.cpp
+        Source/PluginEditor.h
+        Source/Controls/KR106Bender.h
+        Source/Controls/KR106Button.h
+        Source/Controls/KR106Keyboard.h
+        Source/Controls/KR106MenuSheet.h
+        Source/Controls/KR106Knob.h
+        Source/Controls/KR106Misc.h
+        Source/Controls/KR106PresetDisplay.h
+        Source/Controls/KR106Scope.h
+        Source/Controls/KR106Slider.h
+        Source/Controls/KR106Switch.h
+        Source/Controls/KR106Tooltip.h
+        Source/Controls/KR106VarianceSheet.h
+    )
+endif()
 
 target_include_directories(KR106 PRIVATE
     Source
@@ -91,13 +124,30 @@ target_compile_definitions(KR106 PUBLIC
     _USE_MATH_DEFINES
 )
 
+if(KR106_HEADLESS)
+    target_compile_definitions(KR106 PUBLIC
+        KR106_HEADLESS=1
+        JUCE_USE_FREETYPE=0
+        JUCE_USE_FONTCONFIG=0
+        JUCE_USE_XRANDR=0
+        JUCE_USE_XINERAMA=0
+        JUCE_USE_XSHM=0
+        JUCE_USE_XRENDER=0
+        JUCE_USE_XCURSOR=0
+        JUCE_MODAL_LOOPS_PERMITTED=0
+    )
+endif()
+
 # Release DSP optimization flags: FMA fusion + skip errno on math calls.
 # Safe for audio DSP (no NaN checks, no errno reads). ~3-4% measured improvement.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(KR106 PRIVATE
+  target_compile_options(KR106 PUBLIC
     $<$<CONFIG:Release>:
+      -O3
       -ffp-contract=fast
       -fno-math-errno
+      -ffunction-sections
+      -fdata-sections
     >
   )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
@@ -108,11 +158,27 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   )
 endif()
 
-target_link_libraries(KR106 PRIVATE
-    juce::juce_audio_utils
-    juce::juce_dsp
-    KR106BinaryData
-)
+if(KR106_HEADLESS)
+    target_link_libraries(KR106 PRIVATE
+        juce::juce_audio_processors
+        juce::juce_dsp
+    )
+    if(UNIX AND NOT APPLE)
+        target_link_options(KR106 INTERFACE
+            -Wl,--gc-sections
+            -Wl,--as-needed
+            -Wl,--exclude-libs,ALL
+            -static-libstdc++
+            -static-libgcc
+        )
+    endif()
+else()
+    target_link_libraries(KR106 PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+        KR106BinaryData
+    )
+endif()
 
 clap_juce_extensions_plugin(TARGET KR106
     CLAP_ID "org.kayrock.kr106"
@@ -120,10 +186,7 @@ clap_juce_extensions_plugin(TARGET KR106
 )
 
 # --- AU SysEx variant (aumf) for Logic Pro SysEx support ---
-# Logic blocks SysEx for aumu (instrument) plugins. This builds a second AU
-# as kAudioUnitType_MusicEffect (aumf), which receives full MIDI including SysEx.
-# Only builds AU format -- VST3/CLAP/LV2 don't need this workaround.
-if(APPLE)
+if(APPLE AND NOT KR106_HEADLESS)
     juce_add_plugin(KR106SysEx
         COMPANY_NAME "Kayrock"
         IS_SYNTH FALSE
@@ -166,7 +229,6 @@ if(APPLE)
         Source/DSP/KR106LFO.h
         Source/DSP/KR106Noise.h
         Source/DSP/KR106Resampler.h
-
         Source/DSP/KR106VCF.h
         Source/DSP/KR106VCF_OPTIMIZED.h
         Source/DSP/KR106VcfFreqJ106.h
@@ -209,7 +271,7 @@ if(APPLE)
 endif()
 
 # macOS: replace JUCE's auto-generated icon with our custom .icns (rounded corners + transparency)
-if(APPLE)
+if(APPLE AND NOT KR106_HEADLESS)
     set(CUSTOM_ICNS "${CMAKE_CURRENT_SOURCE_DIR}/resources/img/KR106.icns")
     add_custom_command(TARGET KR106_Standalone POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy "${CUSTOM_ICNS}"
