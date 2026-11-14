@@ -46,10 +46,28 @@ public:
 
   void prepareToPlay(double sampleRate, int samplesPerBlock) override;
   void releaseResources() override {}
+  bool isBusesLayoutSupported(const BusesLayout& layouts) const override
+  {
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+      return false;
+#if KR106_AUMF_BUILD
+    if (layouts.getMainInputChannelSet() != juce::AudioChannelSet::stereo()
+        && !layouts.getMainInputChannelSet().isDisabled())
+      return false;
+#else
+    if (!layouts.getMainInputChannelSet().isDisabled())
+      return false;
+#endif
+    return true;
+  }
   void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
   juce::AudioProcessorEditor* createEditor() override;
+#if KR106_HEADLESS
+  bool hasEditor() const override { return false; }
+#else
   bool hasEditor() const override { return true; }
+#endif
 
   const juce::String getName() const override { return "KR-106"; }
   bool acceptsMidi() const override { return true; }

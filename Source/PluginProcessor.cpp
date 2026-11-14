@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
+#if !KR106_HEADLESS
 #include "PluginEditor.h"
+#endif
 #include "KR106_Presets_JUCE.h"
 #include "DSP/KR106_HPF.h"
 #include "DSP/KR106ParamValue.h"
@@ -1051,6 +1053,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     return;
   }
 
+#if !KR106_HEADLESS
   // --- Peak detection (pre-saturator) for clip LED ---
   {
     float peak = 0.f;
@@ -1079,6 +1082,7 @@ void KR106AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
     mScopeWritePos.store(wp, std::memory_order_release);
   }
+#endif
 
   // --- Emit MIDI on preset change ---
   if (mSendPresetSysEx.exchange(false, std::memory_order_acquire))
@@ -1733,7 +1737,11 @@ int KR106AudioProcessor::getCCForParam(int paramIdx) const
 
 juce::AudioProcessorEditor* KR106AudioProcessor::createEditor()
 {
+#if KR106_HEADLESS
+  return nullptr;
+#else
   return new KR106Editor(*this);
+#endif
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
